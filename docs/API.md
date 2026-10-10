@@ -47,7 +47,8 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB). All er
 | POST | `/api/rooms/:code/vote` | player | `{ "gameId": string, "vote": "like" \| "nope" \| null }` | `200 Snapshot` | 400 `invalid_vote`, 401, 409 `not_current_game`, 409 `not_voting` |
 | POST | `/api/rooms/:code/next` | host | `{}` | `200 Snapshot` (closes the current card even if votes are missing) | 401, 403, 409 `not_voting` |
 | POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes) | 401, 403, 409 `nothing_to_undo` |
-| GET | `/api/rooms/:code/events` | — | — | `text/event-stream` | 404 |
+| POST | `/api/rooms/:code/kick` | host | `{ "playerId": string }` | `200 Snapshot` (removes the player; see Rules) | 400 `invalid_player`, 401, 403 `not_host`, 404 `player_not_found`, 409 `cannot_kick_host` |
+| GET | `/api/rooms/:code/events` | — | — | `text/event-stream` (`HEAD` answers the headers and ends, without opening a stream) | 404 |
 | GET | `/api/steam/:appId` | — | — | `200` Steam details (unchanged from v1) | 404 `unknown_game`, 429, 502 |
 | GET | `/healthz` | — | — | `200 { "ok": true }` | — |
 
@@ -57,6 +58,7 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB). All er
 
 - **Auto-advance**: when every player has voted on the current card, the server closes it (sets `lastResult`, `index += 1`). When `index === deck.length`, the phase becomes `finished`.
 - A player who joins mid-voting votes starting from the current card.
+- **Kick**: the host removes a non-host player (a duplicate entry from another browser, someone who left). The player's token stops working (`401`), their vote on the current card is deleted (closed cards keep their frozen `results`), `version` increases, and if every remaining player already voted the current card closes like an auto-advance (`match` = every remaining player liked it). A client whose `playerId` disappears from a snapshot was kicked: it clears its stored session and shows "El host te sacó de la sala".
 - Names: trimmed, 1–16 chars, no control characters, unique per room (case-insensitive).
 - Limits: 12 players per room, 500 live rooms, 5 rooms created per IP per hour, rooms expire after 2 h without activity.
 

@@ -59,6 +59,7 @@ export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const CODE_LENGTH = 6;
 const NAME_MAX = 16;
 const MAX_CODE_ATTEMPTS = 50;
+const PLAYER_ID_MAX = 64;
 // C0/C1 controls plus bidi overrides/isolates, which can visually spoof another player's name.
 const FORBIDDEN_NAME_CHARS = /[\p{Cc}‪-‮⁦-⁩]/u;
 
@@ -183,6 +184,29 @@ export class RoomStore {
     room.phase = 'voting';
     // null instead of the previous result so clients don't replay an old swipe/match animation.
     room.lastResult = null;
+    this.touch(room);
+    return toSnapshot(room);
+  }
+
+  /**
+   * Host removes a player (duplicate entry, someone who left). Their token stops working, their vote on
+   * the current card is dropped (closed cards keep their frozen results) and, if everyone left already
+   * voted, the card closes exactly like an auto-advance.
+   */
+  kick(code: string, token: string | null, playerId: unknown): Snapshot {
+    const room = this.getRoom(code);
+    this.requireHost(room, token);
+    if (typeof playerId !== 'string' || playerId.length === 0 || playerId.length > PLAYER_ID_MAX) {
+      throw new RoomError(400, 'invalid_player', 'Expected { playerId: string }');
+    }
+    const target = room.players.find((p) => p.id === playerId);
+    if (!target) throw new RoomError(404, 'player_not_found', 'That player is not in the room');
+    if (target.isHost) throw new RoomError(409, 'cannot_kick_host', 'The host cannot be removed');
+    room.players = room.players.filter((p) => p !== target);
+    if (room.phase === 'voting') {
+      applyVote(room, target.id, room.deck[room.index], null);
+      if (everyoneVoted(room)) closeCurrentCard(room);
+    }
     this.touch(room);
     return toSnapshot(room);
   }

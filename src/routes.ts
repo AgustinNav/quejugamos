@@ -5,6 +5,7 @@ import type { CatalogGame } from './deck.ts';
 import { bearerToken, readJsonBody, sendError, sendJson } from './http.ts';
 import type { Logger } from './log.ts';
 import type { RoomStore, Snapshot } from './rooms.ts';
+import { SSE_HEADERS } from './sse.ts';
 import type { SseHub } from './sse.ts';
 import type { SteamClient } from './steam.ts';
 
@@ -93,8 +94,20 @@ export const undoCard: Handler = async (deps, { req, res, code }) => {
   sendJson(res, 200, after);
 };
 
-export const roomEvents: Handler = (deps, { res, code }) => {
+export const kickPlayer: Handler = async (deps, { req, res, code }) => {
+  const body = await readJsonBody(req);
+  const playerId = field(body, 'playerId');
+  const before = deps.store.snapshot(code);
+  const after = deps.store.kick(code, bearerToken(req), playerId);
+  deps.log('player_kicked', { roomCode: after.code, playerId, players: after.players.length, phase: after.phase });
+  publish(deps, before, after);
+  sendJson(res, 200, after);
+};
+
+export const roomEvents: Handler = (deps, { req, res, code }) => {
   const snapshot = deps.store.snapshot(code);
+  // HEAD must not hold a stream slot open: answer the headers and end.
+  if (req.method === 'HEAD') return void res.writeHead(200, SSE_HEADERS).end();
   if (!deps.hub.connect(snapshot.code, res, snapshot)) {
     sendError(res, 503, 'capacity', 'Too many live connections for this room');
   }

@@ -4,7 +4,7 @@ import type { Snapshot } from './rooms.ts';
 
 export type SseHubOptions = { maxPerRoom?: number; pingMs?: number };
 
-const SSE_HEADERS = {
+export const SSE_HEADERS = {
   'Content-Type': 'text/event-stream; charset=utf-8',
   'Cache-Control': 'no-cache, no-transform',
   Connection: 'keep-alive',
