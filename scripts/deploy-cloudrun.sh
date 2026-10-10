@@ -40,7 +40,7 @@ log() { printf '\n==> %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 require_cli_and_auth() {
-  command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not found. See docs/DEPLOY.md."
+  command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not found. See docs/DEPLOY-CLOUDRUN.md."
   [[ -n "${PROJECT_ID}" ]] || die "PROJECT_ID is not set and no default gcloud project is configured."
   gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . \
     || die "No active gcloud account. Run: gcloud auth login"

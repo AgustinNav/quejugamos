@@ -75,7 +75,7 @@ Instance-based tiene más free tier y un peor caso más barato (~USD 44/mes 24/7
 1. **Cloud Run request-based en `us-central1`** con `--max-instances=1 --min-instances=0 --cpu=1 --memory=512Mi --concurrency=1000 --timeout=3600 --cpu-throttling`. Está implementado en `scripts/deploy-cloudrun.sh`.
    - Gana porque: USD 0 realista, HTTPS y dominio `*.run.app` gratis, cero servidores que mantener, revisiones con rollback instantáneo, y le suma al CV para MeLi (Docker + CI/CD + WIF + observabilidad).
    - `us-central1` porque es Tier 1 (precio más bajo, free tier completo) y es una de las regiones del always-free de GCE. La latencia desde Argentina es de ~150–200 ms (estimación, no medida). Alcanza para votar.
-2. **Budget alert de USD 1** (`scripts/setup-budget.sh`) **antes** del primer deploy. Opcional: kill switch (ver `docs/DEPLOY.md`).
+2. **Budget alert de USD 1** (`scripts/setup-budget.sh`) **antes** del primer deploy. Opcional: kill switch (ver `docs/DEPLOY-CLOUDRUN.md`).
 3. **Plan B: Render free** si el requisito pasa a ser "no quiero dar tarjeta" o "riesgo de factura = 0 garantizado". Se acepta el cold start de ~1 min y la posibilidad de perder salas por reinicio.
 
 ## Riesgos y mitigaciones

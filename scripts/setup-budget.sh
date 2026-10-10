@@ -3,7 +3,7 @@
 #
 # IMPORTANT: a GCP budget only SENDS EMAILS. It does NOT stop or cap spending. The hard stop is the
 # optional "kill switch" (budget -> Pub/Sub -> function that disables billing), documented in
-# docs/DEPLOY.md and not implemented here on purpose: it deletes the project's billing link, which
+# docs/DEPLOY-CLOUDRUN.md and not implemented here on purpose: it deletes the project's billing link, which
 # takes the service down.
 #
 # Usage:
@@ -20,7 +20,7 @@ BUDGET_AMOUNT_DEFAULT_USD="1"
 log() { printf '\n==> %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not found. See docs/DEPLOY.md."
+command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not found. See docs/DEPLOY-CLOUDRUN.md."
 [[ -n "${PROJECT_ID}" ]] || die "PROJECT_ID is not set and no default gcloud project is configured."
 
 billing_account_id() {

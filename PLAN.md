@@ -1,3 +1,5 @@
+> **Documento histórico (plan inicial).** El estado actual vive en `CLAUDE.md` y `README.md`: el producto se llama ¿Qué Jugamos?, el deploy es Render free y el QR está vendorizado.
+
 # ¿Qué Jugamos? (ex GameMatch) v2 — Plan de publicación
 
 **Fecha:** 2026-10-09 · **Estado:** propuesto · **Audiencia:** sesión de ejecución (Claude) + Agus

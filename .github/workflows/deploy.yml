@@ -1,6 +1,6 @@
 # Manual deploy to Cloud Run. Keyless: GitHub's OIDC token is exchanged for short-lived GCP
 # credentials via Workload Identity Federation, so no service-account key is ever stored.
-# One-time setup: docs/DEPLOY.md, section "Deploy desde GitHub Actions".
+# One-time setup: docs/DEPLOY-CLOUDRUN.md, section "Deploy desde GitHub Actions".
 #
 # Required repository variables (Settings > Secrets and variables > Actions > Variables; not secrets,
 # none of them grant access on their own):
