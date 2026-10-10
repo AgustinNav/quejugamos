@@ -100,6 +100,7 @@ export function failRoom(room, code) {
   disposeRoom(room);
   resetMedia();
   setConnBadge(false);
+  $('progress').hidden = true;
   const retryLabel = RELOADABLE_ERRORS[code];
   showError(code, retryLabel ? { onRetry: () => location.reload(), retryLabel } : {});
 }
