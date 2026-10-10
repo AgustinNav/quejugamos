@@ -249,6 +249,7 @@ async function undo(req, res, room) {
   room.phase = 'voting';
   delete room.votes[room.deck[room.index]];
   room.lastResult = null;
+  room.botTimers.clear(); // let bots vote again on the reopened card
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
