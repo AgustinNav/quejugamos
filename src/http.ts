@@ -105,7 +105,52 @@ export function clientIp(req: IncomingMessage, trustedProxyHops: number): string
   return candidate && /^[0-9A-Fa-f.:]{2,45}$/.test(candidate) ? candidate : socketIp;
 }
 
-export type RateLimiter = { hit: (key: string) => boolean; prune: () => void };
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+function isIpv4(value: string): boolean {
+  const match = IPV4.exec(value);
+  return match !== null && match.slice(1).every((octet) => Number(octet) <= 255);
+}
+
+/** Expands an IPv6 address to 8 numeric groups, or null if it isn't one. Accepts a dotted IPv4 tail. */
+function ipv6Groups(value: string): number[] | null {
+  let text = value;
+  const tail = /:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(text);
+  if (tail) {
+    if (!isIpv4(tail[1])) return null;
+    const [a, b, c, d] = tail[1].split('.').map(Number);
+    text = `${text.slice(0, tail.index)}:${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const parse = (part: string) => (part === '' ? [] : part.split(':'));
+  const head = parse(halves[0]);
+  const rest = halves.length === 2 ? parse(halves[1]) : [];
+  const missing = 8 - head.length - rest.length;
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...rest];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+
+/**
+ * Identity used for per-client limits. One IPv6 subscriber typically owns a whole /64, so keying by
+ * the full address would let a single user rotate through 2^64 identities: IPv6 is keyed by its /64.
+ * IPv4-mapped IPv6 (::ffff:a.b.c.d, what a dual-stack socket reports for IPv4 peers) is the IPv4.
+ * Anything unparseable is returned as-is (still a stable key, never a crash).
+ */
+export function rateLimitKey(ip: string): string {
+  const address = ip.replace(/%.*$/, ''); // Zone id (fe80::1%eth0) is local routing noise.
+  if (isIpv4(address)) return address;
+  const groups = ipv6Groups(address);
+  if (!groups) return ip;
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+  }
+  return `${groups.slice(0, 4).map((g) => g.toString(16)).join(':')}::/64`;
+}
+
+export type RateLimiter ={ hit: (key: string) => boolean; prune: () => void };
 
 /** Fixed-window counter. hit() returns true when the key is over the limit. */
 export function createRateLimiter(windowMs: number, max: number, now: () => number = Date.now): RateLimiter {

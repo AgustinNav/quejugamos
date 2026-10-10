@@ -8,7 +8,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { GAMES, PLATFORMS } from '../public/games.js';
 import { loadConfig } from './config.ts';
 import type { AppConfig } from './config.ts';
-import { HttpError, clientIp, createRateLimiter, forwardedFor, parsePathname, safeDecode, sendError, sendJson } from './http.ts';
+import { HttpError, clientIp, createRateLimiter, forwardedFor, parsePathname, rateLimitKey, safeDecode, sendError, sendJson } from './http.ts';
 import { createLogger } from './log.ts';
 import type { Logger } from './log.ts';
 import { DEFAULT_LIMITS, RoomError, RoomStore } from './rooms.ts';
@@ -174,9 +174,10 @@ function createHandler(deps: ApiDeps, config: AppConfig) {
     if (pathname === null) return sendError(res, 400, 'bad_request', 'Malformed URL');
     if (pathname === '/healthz') return sendJson(res, 200, { ok: true });
     if (pathname.startsWith('/api/')) {
-      const ip = clientIp(req, config.trustedProxyHops);
+      const resolvedIp = clientIp(req, config.trustedProxyHops);
+      const ip = rateLimitKey(resolvedIp);
       if (config.logProxyHeaders && req.method === 'POST' && pathname === '/api/rooms') {
-        deps.log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp: ip });
+        deps.log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp, rateKey: ip });
       }
       if (limiter.hit(ip)) return sendError(res, 429, 'rate_limited', 'Too many requests', { 'Retry-After': '60' });
       return routeApi(deps, req, res, pathname, ip);

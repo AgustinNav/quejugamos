@@ -45,6 +45,10 @@ export type RoomLimits = {
   roomsPerIpPerWindow: number;
   ipWindowMs: number;
   ttlMs: number;
+  // A lobby nobody joined is cheap to create and costs nothing to abandon: it gets a shorter TTL.
+  lobbyTtlMs: number;
+  // At capacity, a lone-host lobby idle this long is evicted to make room for a new one.
+  lobbyEvictIdleMs: number;
 };
 
 export const DEFAULT_LIMITS: RoomLimits = {
@@ -53,6 +57,8 @@ export const DEFAULT_LIMITS: RoomLimits = {
   roomsPerIpPerWindow: 5,
   ipWindowMs: 60 * 60 * 1000,
   ttlMs: 2 * 60 * 60 * 1000,
+  lobbyTtlMs: 20 * 60 * 1000,
+  lobbyEvictIdleMs: 5 * 60 * 1000,
 };
 
 export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -239,6 +245,7 @@ export class RoomStore {
       throw new RoomError(429, 'rate_limited', 'Too many rooms created from this address, try again later');
     }
     if (this.rooms.size >= this.limits.maxRooms) this.expire();
+    if (this.rooms.size >= this.limits.maxRooms) this.evictIdleLobby();
     if (this.rooms.size >= this.limits.maxRooms) throw new RoomError(503, 'capacity', 'Server is at capacity, try again later');
   }
 
@@ -280,7 +287,17 @@ export class RoomStore {
   }
 
   private isExpired(room: Room): boolean {
-    return this.deps.now() - room.lastActivity > this.limits.ttlMs;
+    const ttl = isLoneHostLobby(room) ? this.limits.lobbyTtlMs : this.limits.ttlMs;
+    return this.deps.now() - room.lastActivity > ttl;
+  }
+
+  /** Frees one slot by evicting the longest-idle lone-host lobby, if it has been idle long enough. */
+  private evictIdleLobby(): void {
+    let oldest: Room | undefined;
+    for (const room of this.rooms.values()) {
+      if (isLoneHostLobby(room) && (!oldest || room.lastActivity < oldest.lastActivity)) oldest = room;
+    }
+    if (oldest && this.deps.now() - oldest.lastActivity >= this.limits.lobbyEvictIdleMs) this.remove(oldest.code);
   }
 
   private remove(code: string): string {
@@ -295,6 +312,10 @@ export class RoomStore {
       if (!times.some((at) => at > cutoff)) this.creationsByIp.delete(ip);
     }
   }
+}
+
+function isLoneHostLobby(room: Room): boolean {
+  return room.phase === 'lobby' && room.players.length === 1;
 }
 
 /** Returns true when the stored vote actually changed. */
