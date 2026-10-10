@@ -32,10 +32,11 @@ export function toast(message) {
 }
 
 // Screen-reader announcement; clearing first makes repeated messages re-announce.
+// setTimeout (not rAF) so it still lands when the tab is in the background.
 export function announce(message) {
   const el = $('announcer');
   el.textContent = '';
-  requestAnimationFrame(() => { el.textContent = message; });
+  setTimeout(() => { el.textContent = message; }, 50);
 }
 
 // Builds an <li> list with textContent only, so user names can never inject markup.

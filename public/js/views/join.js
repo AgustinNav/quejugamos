@@ -10,7 +10,9 @@ export function showJoin(code, snapshot, onSubmit) {
   const host = snapshot.players.find((p) => p.isHost);
   const others = snapshot.players.length - 1;
   const already = others > 0 ? ` y ${others} ${others === 1 ? 'amigo más' : 'amigos más'}` : '';
-  $('joinWho').textContent = host ? `Están ${host.name}${already}. ${snapshot.phase === 'voting' ? 'Ya arrancaron: entrás votando desde la tarjeta actual.' : ''}` : '';
+  const verb = others > 0 ? 'Están' : 'Está';
+  const midVote = snapshot.phase === 'voting' ? ' Ya arrancaron: entrás votando desde la tarjeta actual.' : '';
+  $('joinWho').textContent = host ? `${verb} ${host.name}${already}.${midVote}` : '';
   $('joinError').textContent = '';
   showScreen('joinScreen');
   $('joinName').focus();

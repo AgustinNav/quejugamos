@@ -55,15 +55,15 @@ function sendJson(res, status, payload) {
 function readJson(req) {
   return new Promise((resolve, reject) => {
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
-      return reject(new HttpError(415, 'invalid_body', 'Content-Type must be application/json'));
+      return reject(new HttpError(415, 'unsupported_media_type', 'Content-Type must be application/json'));
     }
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 1024) { reject(new HttpError(413, 'invalid_body', 'Body too large')); req.destroy(); }
+      if (raw.length > 1024) { reject(new HttpError(413, 'body_too_large', 'Body too large')); req.destroy(); }
     });
     req.on('end', () => {
-      try { resolve(JSON.parse(raw || '{}')); } catch { reject(new HttpError(400, 'invalid_body', 'Malformed JSON')); }
+      try { resolve(JSON.parse(raw || '{}')); } catch { reject(new HttpError(400, 'invalid_json', 'Malformed JSON')); }
     });
   });
 }
@@ -248,6 +248,7 @@ async function undo(req, res, room) {
   room.index -= 1;
   room.phase = 'voting';
   delete room.votes[room.deck[room.index]];
+  room.lastResult = null;
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
