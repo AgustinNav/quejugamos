@@ -52,7 +52,7 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function readJson(req) {
+function readJson(req, limit = 1024) {
   return new Promise((resolve, reject) => {
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
       return reject(new HttpError(415, 'unsupported_media_type', 'Content-Type must be application/json'));
@@ -60,7 +60,7 @@ function readJson(req) {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 1024) { reject(new HttpError(413, 'body_too_large', 'Body too large')); req.destroy(); }
+      if (raw.length > limit) { reject(new HttpError(413, 'body_too_large', 'Body too large')); req.destroy(); }
     });
     req.on('end', () => {
       try { resolve(JSON.parse(raw || '{}')); } catch { reject(new HttpError(400, 'invalid_json', 'Malformed JSON')); }
@@ -150,12 +150,27 @@ function validFilters(filters) {
   return { platforms: filters.platforms, maxPrice: filters.maxPrice, fitsGroup: filters.fitsGroup };
 }
 
-function closeCard(room) {
+// Same rules as the real server: excludeGameIds is optional, max 200, known catalog ids only.
+const KNOWN_IDS = new Set(GAMES.map((g) => g.id));
+function excludedIds(filters) {
+  const ids = filters?.excludeGameIds;
+  if (ids === undefined) return new Set();
+  if (!Array.isArray(ids) || ids.length > 200 || !ids.every((id) => KNOWN_IDS.has(id))) {
+    throw new HttpError(400, 'invalid_filters', 'excludeGameIds inválido');
+  }
+  return new Set(ids);
+}
+
+// skippedBy: "Ya lo jugamos" — votes discarded, never a match.
+function closeCard(room, skippedBy = null) {
   const gameId = room.deck[room.index];
+  if (skippedBy) delete room.votes[gameId];
   const votes = room.votes[gameId] || {};
   const likes = Object.values(votes).filter((v) => v === 'like').length;
   const nopes = Object.values(votes).filter((v) => v === 'nope').length;
-  room.lastResult = { gameId, likes, nopes, match: likes === room.players.length };
+  room.lastResult = skippedBy
+    ? { gameId, likes, nopes, match: false, played: true, skippedBy }
+    : { gameId, likes, nopes, match: likes === room.players.length };
   room.history.push(room.lastResult);
   room.index += 1;
   if (room.index >= room.deck.length) room.phase = 'finished';
@@ -221,11 +236,12 @@ async function join(req, res, room) {
 }
 
 async function start(req, res, room) {
-  const body = await readJson(req);
+  const body = await readJson(req, 16 * 1024);
   auth(req, room, { host: true });
   if (room.phase !== 'lobby') throw new HttpError(409, 'already_started', 'Ya empezó');
   const filters = validFilters(body.filters);
-  const deck = buildDeck(filters, room.players.length);
+  const excluded = excludedIds(body.filters);
+  const deck = buildDeck(filters, room.players.length).filter((id) => !excluded.has(id));
   if (!deck.length) throw new HttpError(422, 'empty_deck', 'Ningún juego pasa los filtros');
   Object.assign(room, { phase: 'voting', filters, deck, index: 0, votes: {}, lastResult: null, history: [] });
   changed(room);
@@ -271,6 +287,17 @@ async function next(req, res, room) {
   auth(req, room, { host: true });
   if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
   closeCard(room);
+  changed(room);
+  sendJson(res, 200, snapshot(room));
+}
+
+async function skip(req, res, room) {
+  const body = await readJson(req);
+  const player = auth(req, room);
+  if (typeof body?.gameId !== 'string' || !body.gameId || body.gameId.length > 64) throw new HttpError(400, 'invalid_game', 'Juego inválido');
+  if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
+  if (body.gameId !== room.deck[room.index]) throw new HttpError(409, 'not_current_game', 'No es la tarjeta actual');
+  closeCard(room, player.id);
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
@@ -384,6 +411,7 @@ const ROOM_ROUTES = {
   'POST /vote': vote,
   'POST /next': next,
   'POST /undo': undo,
+  'POST /skip': skip,
   'POST /kick': kick,
   'GET /me': me,
   'GET /events': events,
