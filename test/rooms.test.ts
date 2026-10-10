@@ -44,6 +44,49 @@ function votingRoom() {
   return { ...ctx, host, ana, bob, code: host.code };
 }
 
+describe('name validation (invisible / impersonating names)', () => {
+  const INVALID: Record<string, string> = {
+    'zero-width space only': '​',
+    'zero-width chars around a name': 'A​na',
+    'Hangul filler U+3164': 'ㅤ',
+    'Hangul choseong filler U+115F': 'Anaᅟ',
+    'Hangul jungseong filler U+1160': 'ᅠAna',
+    'halfwidth Hangul filler U+FFA0': 'ﾠ',
+    'right-to-left mark': 'Ana‏',
+    'embedded newline': 'An\na',
+    'line separator U+2028': 'An a',
+    'paragraph separator U+2029': 'An a',
+    '15 combining marks': 'a' + '́'.repeat(15),
+    '3 stacked combining marks': 'á̂̃',
+    'only punctuation': '...',
+    'only combining marks': '́̂',
+    'soft hyphen': 'An­a',
+    'ZWJ outside an emoji sequence': 'A‍na',
+  };
+  for (const [label, bad] of Object.entries(INVALID)) {
+    test(`rejects ${label}`, () => expectError(() => makeStore().store.create(bad, '1.1.1.1'), 400, 'invalid_name'));
+  }
+
+  for (const good of ['Agus', 'Ñoño', 'José', 'Juli 🎮', '42', 'éé', '👨‍👩‍👧', '1️⃣ Uno', 'Zoë']) {
+    test(`accepts ${JSON.stringify(good)}`, () => {
+      const { store } = makeStore();
+      const { code } = store.create(good, '1.1.1.1');
+      assert.equal(store.snapshot(code).players[0].name, good.normalize('NFC'));
+    });
+  }
+
+  test('uniqueness folds case, compatibility forms and invisible code points', () => {
+    const { store } = makeStore();
+    const { code } = store.create('Agus', '1.1.1.1');
+    expectError(() => store.join(code, 'ＡＧＵＳ'), 409, 'name_taken'); // fullwidth
+    expectError(() => store.join(code, 'agus️'), 409, 'name_taken'); // variation selector
+    store.join(code, 'José');
+    expectError(() => store.join(code, 'José'), 409, 'name_taken'); // decomposed accent
+    store.join(code, 'Ana 🎮');
+    expectError(() => store.join(code, 'ana 🎮️'), 409, 'name_taken');
+  });
+});
+
 describe('create', () => {
   test('returns code, tokens and host as first player', () => {
     const { store } = makeStore();
@@ -444,6 +487,7 @@ describe('limits and expiry', () => {
   test('rooms expire after 2 h without activity', () => {
     const { store, clock, expired } = makeStore();
     const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
     clock.t += 2 * 60 * 60 * 1000;
     assert.deepEqual(store.expire(), []);
     clock.t += 1;
@@ -452,11 +496,54 @@ describe('limits and expiry', () => {
     expectError(() => store.snapshot(code), 404, 'room_not_found');
   });
 
+  test('a lobby with only the host expires after 20 min idle', () => {
+    const { store, clock, expired } = makeStore();
+    const lone = store.create('Host', '1.1.1.1');
+    const joined = store.create('Host', '1.1.1.2');
+    store.join(joined.code, 'Ana');
+    clock.t += 20 * 60 * 1000;
+    assert.deepEqual(store.expire(), []);
+    clock.t += 1;
+    assert.deepEqual(store.expire(), [lone.code]);
+    assert.deepEqual(expired, [lone.code]);
+    assert.equal(store.snapshot(joined.code).phase, 'lobby');
+  });
+
+  test('a lone host that already started voting keeps the 2 h TTL', () => {
+    const { store, clock } = makeStore();
+    const { code, hostToken } = store.create('Host', '1.1.1.1');
+    store.start(code, hostToken, FILTERS, fixedDeck);
+    clock.t += 21 * 60 * 1000;
+    assert.deepEqual(store.expire(), []);
+  });
+
+  test('at capacity, the longest-idle lone-host lobby is evicted first', () => {
+    const { store, clock, expired } = makeStore({ maxRooms: 3 });
+    const busy = store.create('Host', '10.0.0.1');
+    store.join(busy.code, 'Ana');
+    const older = store.create('Host', '10.0.0.2');
+    clock.t += 60_000;
+    const newer = store.create('Host', '10.0.0.3');
+    clock.t += 5 * 60 * 1000;
+    const created = store.create('Host', '10.0.0.4');
+    assert.deepEqual(expired, [older.code]);
+    for (const code of [busy.code, newer.code, created.code]) assert.ok(store.snapshot(code));
+  });
+
+  test('at capacity, a lobby created moments ago is not evicted', () => {
+    const { store, clock } = makeStore({ maxRooms: 2 });
+    store.create('Host', '10.0.0.1');
+    store.create('Host', '10.0.0.2');
+    clock.t += 4 * 60 * 1000;
+    expectError(() => store.create('Host', '10.0.0.3'), 503, 'capacity');
+  });
+
   test('activity extends the TTL', () => {
     const { store, clock } = makeStore();
     const { code } = store.create('Host', '1.1.1.1');
-    clock.t += 90 * 60 * 1000;
     store.join(code, 'Ana');
+    clock.t += 90 * 60 * 1000;
+    store.join(code, 'Bob');
     clock.t += 90 * 60 * 1000;
     assert.deepEqual(store.expire(), []);
   });

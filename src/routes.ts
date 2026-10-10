@@ -112,12 +112,12 @@ export const kickPlayer: Handler = async (deps, { req, res, code }) => {
   sendJson(res, 200, after);
 };
 
-export const roomEvents: Handler = (deps, { req, res, code }) => {
+export const roomEvents: Handler = (deps, { req, res, code, ip }) => {
   const snapshot = deps.store.snapshot(code);
   // HEAD must not hold a stream slot open: answer the headers and end.
   if (req.method === 'HEAD') return void res.writeHead(200, SSE_HEAD_HEADERS).end();
-  if (!deps.hub.connect(snapshot.code, res, snapshot)) {
-    sendError(res, 503, 'capacity', 'Too many live connections for this room');
+  if (!deps.hub.connect(snapshot.code, res, snapshot, ip)) {
+    sendError(res, 503, 'capacity', 'Too many live connections, try again later');
   }
 };
 

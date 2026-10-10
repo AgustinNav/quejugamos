@@ -23,7 +23,7 @@ const PING_MS = 25_000;
 const STEAM_CDN = 'https://*.steamstatic.com';
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' https://cdn.jsdelivr.net",
+  "script-src 'self'",
   "style-src 'self' https://fonts.googleapis.com",
   'font-src https://fonts.gstatic.com',
   `img-src 'self' data: ${STEAM_CDN}`,

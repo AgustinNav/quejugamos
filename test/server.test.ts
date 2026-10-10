@@ -305,6 +305,14 @@ describe('malformed input never kills the process', () => {
     assert.equal(await rawRequest(srv.port, 'GET //\\\\evil HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n') < 500, true);
   });
 
+  test('NUL byte after decoding is a 400, not a 500 with a stack trace', async () => {
+    const res = await api(base, 'GET', '/a%00b');
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'bad_request');
+    assert.equal((await api(base, 'GET', '/vendor/%00.js')).status, 400);
+    assert.ok(!srv.logs.some((l) => JSON.parse(l).severity === 'ERROR'), 'unexpected ERROR log');
+  });
+
   test('wrong methods and unknown API paths', async () => {
     const room = await createRoom();
     const wrong = await api(base, 'GET', `/api/rooms/${room.code}/vote`);
@@ -338,6 +346,18 @@ describe('static files', () => {
     const room = await fetch(`${base}/r/ABC234`);
     assert.equal(room.status, 200);
     assert.equal(await room.text(), html);
+  });
+
+  test('hls.js is vendored and the CSP allows no third-party script origin', async () => {
+    const index = await fetch(`${base}/`);
+    const csp = index.headers.get('content-security-policy') ?? '';
+    assert.match(csp, /script-src 'self'(;|$)/);
+    assert.ok(!csp.includes('jsdelivr'), csp);
+    assert.match(await index.text(), /<script src="\/vendor\/hls\.min\.js"/);
+    const hls = await fetch(`${base}/vendor/hls.min.js`);
+    assert.equal(hls.status, 200);
+    assert.match(hls.headers.get('content-type') ?? '', /^text\/javascript/);
+    await hls.arrayBuffer();
   });
 
   test('blocks traversal', async () => {

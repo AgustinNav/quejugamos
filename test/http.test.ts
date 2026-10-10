@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IncomingMessage } from 'node:http';
-import { bearerToken, clientIp, createRateLimiter, parsePathname, safeDecode } from '../src/http.ts';
+import { bearerToken, clientIp, createRateLimiter, parsePathname, rateLimitKey, safeDecode } from '../src/http.ts';
 import { createLogger } from '../src/log.ts';
 
 function fakeReq(headers: Record<string, string | string[]>, remoteAddress = '127.0.0.1'): IncomingMessage {
@@ -33,6 +33,45 @@ describe('clientIp', () => {
   });
 });
 
+describe('rateLimitKey', () => {
+  test('IPv4 is its own key', () => {
+    assert.equal(rateLimitKey('203.0.113.7'), '203.0.113.7');
+  });
+
+  test('IPv6 collapses to its /64 regardless of how it is written', () => {
+    const expected = '2001:db8:aa:1::/64';
+    for (const ip of [
+      '2001:db8:aa:1::1',
+      '2001:db8:aa:1:ffff:ffff:ffff:ffff',
+      '2001:0DB8:00AA:0001:0000:0000:0000:0001',
+      '2001:db8:aa:1:0:0:0:abcd',
+      '2001:db8:aa:1::192.0.2.1',
+      '2001:db8:aa:1::9%eth0',
+    ]) assert.equal(rateLimitKey(ip), expected, ip);
+    assert.notEqual(rateLimitKey('2001:db8:aa:2::1'), expected);
+  });
+
+  test('compressed zeros inside the prefix are expanded correctly', () => {
+    assert.equal(rateLimitKey('2001:db8::1'), '2001:db8:0:0::/64');
+    assert.equal(rateLimitKey('2001:db8:0:0:1::'), '2001:db8:0:0::/64');
+    assert.equal(rateLimitKey('::1'), '0:0:0:0::/64');
+    assert.equal(rateLimitKey('::'), '0:0:0:0::/64');
+  });
+
+  test('IPv4-mapped IPv6 is treated as the IPv4', () => {
+    assert.equal(rateLimitKey('::ffff:203.0.113.7'), '203.0.113.7');
+    assert.equal(rateLimitKey('::FFFF:203.0.113.7'), '203.0.113.7');
+    assert.equal(rateLimitKey('::ffff:cb00:7107'), '203.0.113.7');
+    assert.equal(rateLimitKey('0:0:0:0:0:ffff:203.0.113.7'), '203.0.113.7');
+  });
+
+  test('garbage is returned unchanged instead of throwing', () => {
+    for (const bad of ['unknown', '1:2:3', '1::2::3', '1:2:3:4:5:6:7:8:9', '::ffff:999.1.1.1', '12345::1']) {
+      assert.equal(rateLimitKey(bad), bad);
+    }
+  });
+});
+
 describe('helpers', () => {
   test('bearerToken', () => {
     assert.equal(bearerToken(fakeReq({ authorization: 'Bearer abc-123' })), 'abc-123');
@@ -57,6 +96,19 @@ describe('helpers', () => {
     assert.equal(limiter.hit('b'), false);
     clock.t = 1001;
     assert.equal(limiter.hit('a'), false);
+  });
+
+  test('rate limiter isLimited peeks without counting and resets with the window', () => {
+    const clock = { t: 0 };
+    const limiter = createRateLimiter(1000, 1, () => clock.t);
+    assert.equal(limiter.isLimited('a'), false);
+    limiter.hit('a');
+    assert.equal(limiter.isLimited('a'), false);
+    assert.equal(limiter.isLimited('a'), false, 'peeking must not count');
+    limiter.hit('a');
+    assert.equal(limiter.isLimited('a'), true);
+    clock.t = 1001;
+    assert.equal(limiter.isLimited('a'), false);
   });
 
   test('logger writes one JSON line with severity', () => {

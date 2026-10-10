@@ -55,7 +55,7 @@ El rate limit identifica a cada usuario por IP usando `X-Forwarded-For`. Render 
 
 Cómo calibrarlo:
 
-1. Con `LOG_PROXY_HEADERS=1`, que es el valor por defecto en `render.yaml`, creá una sala **desde el celular con 4G**.
+1. En Render → servicio → **Environment**, poné `LOG_PROXY_HEADERS=1` (el default de `render.yaml` es `0` porque el log incluye IPs). Después creá una sala **desde el celular con 4G**.
 2. En Render → servicio → **Logs**, buscá la línea `proxy_headers`:
    ```json
    {"event":"proxy_headers","forwardedFor":["<IP del celu>","<IP de Render>"],"resolvedIp":"..."}
@@ -63,8 +63,17 @@ Cómo calibrarlo:
 3. Buscá tu IP pública real (la del celu en 4G; la ves en https://ifconfig.me desde el celu) dentro de `forwardedFor` y contá su posición **desde la derecha**, empezando en 1. Ese número es `TRUSTED_PROXY_HOPS`.
    - Si tu IP es la última entrada → `1`, que es el valor actual: no hay que cambiar nada.
    - Si es la anteúltima → `2`.
-4. En Render → servicio → **Environment**: poné ese valor en `TRUSTED_PROXY_HOPS` y cambiá `LOG_PROXY_HEADERS` a `0`, para no dejar IPs en los logs. Guardá y Render redeploya solo.
-5. Repetí el paso 1 con `LOG_PROXY_HEADERS=1` un momento, para confirmar que `resolvedIp` ahora es tu IP, y volvé a apagarlo.
+4. En Render → servicio → **Environment**: poné ese valor en `TRUSTED_PROXY_HOPS`. Guardá y Render redeploya solo.
+5. Repetí el paso 1 para confirmar que `resolvedIp` ahora es tu IP.
+6. **Chequeo de spoofing** (con `LOG_PROXY_HEADERS=1` todavía prendido): mandá un `X-Forwarded-For` falso y confirmá que el server no lo usa.
+   ```bash
+   curl -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-For: 6.6.6.6' \
+     -d '{"hostName":"Test"}' https://<tu-servicio>.onrender.com/api/rooms
+   ```
+   En la línea `proxy_headers` de ese request, `resolvedIp` **no** puede ser `6.6.6.6`: tiene que ser tu IP real. Si es `6.6.6.6`, `TRUSTED_PROXY_HOPS` está alto y el rate limit se puede saltear: bajalo y repetí.
+7. Volvé `LOG_PROXY_HEADERS` a `0`, para no dejar IPs en los logs.
+
+> **El Blueprint está en sync manual:** cambiar `render.yaml` no toca las env vars del servicio ya creado. `TRUSTED_PROXY_HOPS` y `LOG_PROXY_HEADERS` se cambian a mano en **Environment**. En particular, un servicio creado cuando el default era `LOG_PROXY_HEADERS=1` sigue en `1` hasta que lo pases a `0` en el dashboard.
 
 ## 5. Deploys siguientes
 

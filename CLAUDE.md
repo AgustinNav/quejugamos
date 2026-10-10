@@ -30,7 +30,9 @@ Cada una existe por una razón concreta. Si una tarea choca con alguna, pará y 
 
 ### Seguridad (ya establecida, no regresionar)
 - CSP estricta sin `'unsafe-inline'` (`src/server.ts`): nada de `<script>`/`<style>` inline ni atributos `style=`/`onclick=`. Estilos dinámicos vía CSSOM (`el.style.x = ...`).
-- Todo script externo lleva `integrity` (SRI) + `crossorigin`. Preferí vendorizar en `public/vendor/` (así se sacó cdnjs del CSP). Un origen nuevo en el CSP necesita justificación.
+- Cero scripts de CDN: `script-src 'self'`. Las libs se vendorizan en `public/vendor/` con su licencia al lado (`qrcode.js`, `hls.min.js` + `hls.LICENSE`), verificando el hash contra el SRI publicado. Un origen nuevo en el CSP necesita justificación. `worker-src blob:` existe porque hls.js crea su worker desde un Blob.
+- Límites por cliente siempre con la key de `rateLimitKey()` (IPv6 → su /64), nunca con la IP cruda: un usuario IPv6 tiene 2^64 direcciones.
+- Toda escritura a un stream SSE pasa por `SseHub` (chequea `writableLength`): escribir directo a un `res` de SSE reabre el OOM por clientes que no leen.
 - Todo parse de input externo (JSON, URL, params, headers, respuesta de Steam) va en try/catch y responde 4xx: un input malformado nunca tumba el proceso, porque una sola instancia caída = todas las salas perdidas.
 - Tokens (`hostToken`, `playerToken`) nunca en logs, snapshots ni eventos SSE.
 - IP del cliente solo vía `TRUSTED_PROXY_HOPS` (entrada N desde la derecha de `X-Forwarded-For`). Leer el header directo permite falsificar la IP y saltear el rate limit.
@@ -78,7 +80,8 @@ Env vars: tabla en `README.md`.
 
 ## Riesgos abiertos
 
-- **Calibración de `X-Forwarded-For` en Render pendiente.** Render no documenta el formato; `render.yaml` arranca con `TRUSTED_PROXY_HOPS=1` y `LOG_PROXY_HEADERS=1`. Si está mal, el límite de 5 salas/IP/hora se vuelve global o falsificable. Después de calibrar, `LOG_PROXY_HEADERS=0` (loguea IPs).
+- **Calibración de `X-Forwarded-For` en Render pendiente.** Render no documenta el formato; `render.yaml` arranca con `TRUSTED_PROXY_HOPS=1` y `LOG_PROXY_HEADERS=0`. Si está mal, el límite de 5 salas/IP/hora se vuelve global o falsificable. Procedimiento + chequeo de spoofing en `docs/DEPLOY.md` §4. El Blueprint está en sync manual: las env vars del servicio se cambian a mano en el dashboard (un servicio creado con el default viejo sigue con `LOG_PROXY_HEADERS=1`).
+- **Homoglyphs en nombres:** se rechazan invisibles y fillers, pero no se detectan look-alikes entre scripts (Cyrillic `а` vs Latin `a`). Solución completa = esqueletos de confusables (UTS #39), fuera de alcance.
 - **Steam `appdetails` no está documentado** por Valve: puede cambiar o empezar a limitar sin aviso. Cache de 6 h; fallas → 502, nunca crash.
 - **Crossplay/plataformas cargados a mano**: los marcados "verificar" no están confirmados.
 - **Rate limits vs lanzamiento viral**: 500 salas totales y 5/IP/hora. Una oficina o un NAT de carrier comparten IP.
