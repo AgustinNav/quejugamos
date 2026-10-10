@@ -17,7 +17,8 @@ Abrir http://localhost:3000. Node 24+ (corre TypeScript nativo, sin build), cero
 | `PORT` | `3000` | Puerto |
 | `HOST` | `127.0.0.1` | `0.0.0.0` para exponer en la red / en un container |
 | `STEAM_CC` | `ar` | Región de precios de Steam |
-| `TRUST_PROXY` | apagado | `1` detrás de Cloud Run: toma la IP del cliente de `X-Forwarded-For` |
+| `TRUSTED_PROXY_HOPS` | `0` | Proxies que agregan entradas a `X-Forwarded-For` delante del server (`TRUST_PROXY=1` equivale a `1`). Ver `docs/DEPLOY.md` §4 |
+| `LOG_PROXY_HEADERS` | `0` | `1` loguea `X-Forwarded-For` al crear una sala, para calibrar lo anterior |
 
 Para probar con celulares en la misma red: `HOST=0.0.0.0 npm start` y abrir `http://<ip-de-tu-pc>:3000`.
 
@@ -37,7 +38,7 @@ npm test
 | `public/` | Frontend vanilla JS: landing, vista host (QR + tarjeta grande) y vista celular |
 | `public/games.js` | Catálogo curado. Para agregar un juego de Steam, sumá una entrada con su `steamId` |
 | `docs/API.md` | Contrato de la API entre frontend y backend |
-| `docs/DEPLOY.md` | Deploy a la nube paso a paso |
+| `docs/DEPLOY.md` | Deploy en Render free (USD 0 garantizado). Plan B: `docs/DEPLOY-CLOUDRUN.md` |
 | `docs/marketing/` | Kit de lanzamiento |
 | `tools/mock-server.mjs` | Server simulado para desarrollar el frontend sin backend |
 

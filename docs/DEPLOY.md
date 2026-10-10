@@ -1,201 +1,84 @@
-# ¿Qué Jugamos? — Deploy desde cero
+# ¿Qué Jugamos? — Deploy en Render (free, USD 0 garantizado)
 
-**Fecha:** 2026-10-09 · **Versión:** 1.0 · **Audiencia:** Agus (owner)
-**Objetivo:** llevar ¿Qué Jugamos? a Cloud Run a USD 0/mes, con guardrails de costo, en ~30 minutos.
+**Fecha:** 2026-10-09 · **Audiencia:** Agus (owner)
+**Objetivo:** publicar la app sin poder gastar ni un peso, en ~15 minutos.
 
 ## TL;DR
 
-```bash
-gcloud auth login
-export PROJECT_ID=quejugamos-<sufijo> REGION=us-central1
-gcloud projects create "$PROJECT_ID"
-gcloud billing projects link "$PROJECT_ID" --billing-account=<ID>
-./scripts/setup-budget.sh       # alerta de USD 1 ANTES del primer deploy
-./scripts/deploy-cloudrun.sh    # build + deploy + smoke test de /healthz
-```
+1. Crear cuenta en Render **con GitHub y sin cargar tarjeta**.
+2. *New → Blueprint* → elegir el repo `AgustinNav/quejugamos` → *Apply*. El `render.yaml` arma todo.
+3. Abrir la URL `https://quejugamos.onrender.com` (o la que asigne Render), crear una sala y mirar el log `proxy_headers` para calibrar el rate limit (paso 4).
 
-Por qué Cloud Run y no otro proveedor: `docs/HOSTING-COSTS.md`.
+## Por qué es USD 0 *garantizado*
 
-## Qué deja armado el script
+- **Sin medio de pago, Render no puede cobrar:** si te pasás de algún límite, suspende los servicios free hasta el mes siguiente ([render.com/docs/free](https://render.com/docs/free)).
+- **La regla que importa: no cargues tarjeta en Render.** Si algún día la cargás, Render empieza a cobrar algunos excedentes, como el ancho de banda, en vez de suspender.
+- 750 horas de instancia por mes, y estar prendido 24/7 son 744 h.
+- El egress es mínimo: los trailers y las imágenes los baja el navegador directo del CDN de Steam, no pasan por Render.
 
-| Flag | Valor | Por qué |
+## Lo que hay que saber del plan free
+
+| Comportamiento | Impacto | Mitigación |
 |---|---|---|
-| `--cpu-throttling` | billing request-based | Se paga solo con requests en curso. Un SSE abierto cuenta como request |
-| `--max-instances` / `--min-instances` | 1 / 0 | Estado en memoria ⇒ una sola instancia. Escala a cero sin costo |
-| `--cpu` / `--memory` | 1 / 512Mi | Con menos de 1 vCPU, Cloud Run obliga a concurrency 1, y eso es incompatible con SSE |
-| `--concurrency` | 1000 | Cada stream SSE ocupa un slot. No cambia el costo |
-| `--timeout` | 3600 | El máximo. `EventSource` reconecta solo al cortarse |
-| `--set-env-vars` | `TRUST_PROXY=1,STEAM_CC=ar` | IP real desde `X-Forwarded-For` detrás del front end de Google |
-| `--service-account` | `quejugamos-runtime@…` sin roles | La app no usa APIs de GCP. La SA default suele tener rol Editor |
-| Cleanup policy en Artifact Registry | Conserva las últimas 3 imágenes | El free tier es de 0,5 GB |
+| Se apaga tras 15 min sin requests **entrantes** | La primera persona espera **~1 min** mientras arranca | Abrir el link un minuto antes de la juntada |
+| SSE (server → celular) **no** cuenta como tráfico entrante | Podría apagarse en plena votación y perder la sala | El frontend hace ping cada 4 min **solo con la pestaña visible** (`public/js/keepalive.js`) |
+| Reinicios cuando Render quiera | Se pierden las salas en memoria | Los clientes muestran "La sala se cerró". Es aceptable para salas de una noche |
+| Builds: minutos limitados por mes | Sin tarjeta, al pasarte se frenan los deploys nuevos, pero lo deployado sigue andando | Deploy solo cuando el CI pasa (`autoDeployTrigger: checksPass`) |
 
----
+## 1. Cuenta
 
-## 1. Instalar gcloud en Windows
+1. https://dashboard.render.com/register → *Sign up with GitHub*.
+2. **Si te ofrece cargar un método de pago, salteálo.**
+3. Autorizá a Render a leer el repo `AgustinNav/quejugamos`. Alcanza con dar acceso a ese repo solo, no a todos.
 
-Elegí una opción:
+## 2. Deploy con el Blueprint
 
-- **A. Cloud Shell (sin instalar nada).** Abrí <https://shell.cloud.google.com>, que ya trae `gcloud`, `docker` y `git`, y corré:
-  `git clone <tu repo> && cd quejugamos`. Los scripts andan tal cual.
-- **B. Local.** En PowerShell, corré `winget install -e --id Google.CloudSDK`, o bajá el instalador de <https://cloud.google.com/sdk/docs/install>. Después abrí **Git Bash** (los scripts son bash) y verificá con `gcloud version`.
+1. Dashboard → **New → Blueprint**.
+2. Elegí `AgustinNav/quejugamos`. Render lee `render.yaml`: servicio web `quejugamos`, Docker, plan `free`, región `virginia`, health check en `/healthz`.
+3. **Apply**. El primer build tarda unos minutos.
+4. Cuando el servicio esté *Live*, abrí la URL `*.onrender.com`.
 
-```bash
-gcloud auth login                 # abre el navegador
-gcloud config set project "$PROJECT_ID"   # opcional; los scripts también leen PROJECT_ID
-```
-
-## 2. Crear el proyecto y vincular billing
+## 3. Verificar
 
 ```bash
-export PROJECT_ID=quejugamos-$RANDOM   # el ID es global y no se puede cambiar
-gcloud projects create "$PROJECT_ID" --name="Que Jugamos"
-gcloud billing accounts list          # copiá el ACCOUNT_ID (XXXXXX-XXXXXX-XXXXXX)
-gcloud billing projects link "$PROJECT_ID" --billing-account=<ACCOUNT_ID>
+curl -s https://<tu-servicio>.onrender.com/healthz
 ```
 
-> Cloud Run exige una billing account aunque no salgas del free tier. Si es una cuenta nueva, el Free Trial (USD 300 / 90 días) **no se convierte solo en pago**: hay que hacer upgrade manual. Cuando termina el trial, los servicios se detienen hasta que hagas ese upgrade.
+Tiene que responder `{"ok":true}`. Después probalo en serio: creá una sala en la PC, entrá desde el celular con 4G (no por wifi, así es otra IP) y votá un par de juegos.
 
-## 3. Budget alert (antes del primer deploy)
+## 4. Calibrar el rate limit (una sola vez, importante)
 
-```bash
-PROJECT_ID=$PROJECT_ID ./scripts/setup-budget.sh               # USD 1/mes por defecto
-PROJECT_ID=$PROJECT_ID BUDGET_AMOUNT=5 ./scripts/setup-budget.sh   # otro monto
-```
+El rate limit identifica a cada usuario por IP usando `X-Forwarded-For`. Render no documenta cuántos proxies agregan entradas a ese header. Si el número está mal, pasa una de dos cosas:
 
-Avisa por mail al 50 %, 90 % y 100 % del gasto real, y al 100 % del **forecast**. Si tu billing account está en ARS, el script corta y te pide `BUDGET_AMOUNT` en esa moneda.
+- **Muy bajo:** todos los usuarios comparten una "IP" y el límite de 5 salas por hora pasa a ser **global**. El lanzamiento se rompe.
+- **Muy alto:** se toma una entrada que el cliente puede falsificar y el rate limit se puede saltear.
 
-> **Un budget NO corta el gasto. Solo manda mails.** GCP no tiene tope duro.
-> El techo real de esta app lo pone `--max-instances=1`: en el peor caso, 1 instancia prendida 24/7 cuesta ~USD 60/mes.
+Cómo calibrarlo:
 
-**Kill switch (opcional, no implementado):** budget → Pub/Sub → Cloud Run function que **desvincula el billing** del proyecto. Guía oficial: <https://docs.cloud.google.com/billing/docs/how-to/disable-billing-with-notifications>. Ojo: apaga **todo** el proyecto, puede borrar recursos, y la recuperación es manual. Además, las notificaciones llegan con demora, así que el gasto puede pasar el umbral igual. Para una app de USD 0 alcanza con la alerta y mirar el mail. El kill switch tiene sentido si viralizás y no vas a estar atento.
+1. Con `LOG_PROXY_HEADERS=1`, que es el valor por defecto en `render.yaml`, creá una sala **desde el celular con 4G**.
+2. En Render → servicio → **Logs**, buscá la línea `proxy_headers`:
+   ```json
+   {"event":"proxy_headers","forwardedFor":["<IP del celu>","<IP de Render>"],"resolvedIp":"..."}
+   ```
+3. Buscá tu IP pública real (la del celu en 4G; la ves en https://ifconfig.me desde el celu) dentro de `forwardedFor` y contá su posición **desde la derecha**, empezando en 1. Ese número es `TRUSTED_PROXY_HOPS`.
+   - Si tu IP es la última entrada → `1`, que es el valor actual: no hay que cambiar nada.
+   - Si es la anteúltima → `2`.
+4. En Render → servicio → **Environment**: poné ese valor en `TRUSTED_PROXY_HOPS` y cambiá `LOG_PROXY_HEADERS` a `0`, para no dejar IPs en los logs. Guardá y Render redeploya solo.
+5. Repetí el paso 1 con `LOG_PROXY_HEADERS=1` un momento, para confirmar que `resolvedIp` ahora es tu IP, y volvé a apagarlo.
 
-## 4. Primer deploy
+## 5. Deploys siguientes
 
-```bash
-PROJECT_ID=$PROJECT_ID REGION=us-central1 ./scripts/deploy-cloudrun.sh
-```
+Push a `main`, GitHub Actions corre los tests y el smoke test de Docker, y si pasan, Render deploya solo (`autoDeployTrigger: checksPass`). Para deployar a mano: servicio → **Manual Deploy**.
 
-El script:
+## 6. Logs y rollback
 
-1. Valida gcloud, la sesión y el billing.
-2. Habilita las APIs `run`, `cloudbuild`, `artifactregistry` e `iam`.
-3. Crea la SA de runtime sin permisos.
-4. Corre `gcloud run deploy --source .`: Cloud Build construye el `Dockerfile` y Cloud Run publica una revisión nueva con el 100 % del tráfico.
-5. Aplica la cleanup policy.
-6. Hace `curl /healthz` contra la URL `https://quejugamos-xxxx.us-central1.run.app`.
+- **Logs:** servicio → **Logs**. La app escribe JSON con `severity` y eventos como `room_created`, `card_closed` (con `match`), `room_expired` y `error`.
+- **Rollback:** servicio → **Events**, elegís un deploy anterior y le das **Rollback**.
 
-Es idempotente: re-ejecutarlo equivale a "deployar la versión actual".
+## 7. Dominio propio (opcional)
 
-Variables opcionales: `REGION`, `SERVICE`, `STEAM_CC`, `MEMORY`, `CONCURRENCY`, `REQUEST_TIMEOUT`, `IMAGE` (deployar una imagen ya construida en vez de `--source`).
+Servicio → **Settings → Custom Domains**. Render emite el certificado TLS gratis. El dominio lo pagás aparte en el registrador, así que esto sí cuesta plata (un `.com.ar` en NIC Argentina es barato, pero no es USD 0). Sin dominio propio, la URL `*.onrender.com` sirve igual.
 
-## 5. Dominio propio (opcional)
+## Plan B
 
-| Opción | Costo | SSE | Veredicto |
-|---|---|---|---|
-| URL `*.run.app` | 0 | OK | **Usar esta** salvo que el dominio sea parte del marketing |
-| Cloud Run domain mapping | 0 (solo el dominio) | OK | Preview y "no recomendado para producción" según Google, pero disponible en `us-central1`. Alcanza para este proyecto |
-| Firebase Hosting rewrite | Free tier | **Riesgoso.** Hasta donde sé, los rewrites a Cloud Run tienen timeout de 60 s (no lo verifiqué en esta sesión) | Evitar para `/events` |
-| Global external Load Balancer | **~USD 18+/mes** (forwarding rule) | OK | **No.** Rompe el objetivo de USD 0 |
-
-```bash
-gcloud domains verify midominio.com
-gcloud beta run domain-mappings create --service quejugamos --domain play.midominio.com --region us-central1
-# Crear en tu DNS los registros que imprime el comando. El certificado TLS se emite solo (puede tardar ~15–60 min).
-```
-
-## 6. Ver logs
-
-La app escribe JSON a stdout con el campo `severity`. Cloud Logging lo parsea automáticamente, así que podés filtrar por nivel y por campos (`jsonPayload.roomCode`).
-
-```bash
-# Últimos errores/warnings del día
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="quejugamos" AND severity>=WARNING' \
-  --project "$PROJECT_ID" --freshness=1d --limit=50
-
-# Eventos de una sala
-gcloud logging read 'resource.labels.service_name="quejugamos" AND jsonPayload.roomCode="ABC234"' --project "$PROJECT_ID" --limit=100
-```
-
-En la consola: Cloud Run → `quejugamos` → **Logs** / **Metrics**. Para controlar costos, la métrica clave es **Billable container instance time**.
-
-## 7. Rollback
-
-```bash
-gcloud run revisions list --service quejugamos --region us-central1 --project "$PROJECT_ID"
-gcloud run services update-traffic quejugamos --region us-central1 --project "$PROJECT_ID" \
-  --to-revisions=quejugamos-00007-abc=100
-# Volver a "siempre la última revisión" cuando el fix esté deployado:
-gcloud run services update-traffic quejugamos --region us-central1 --project "$PROJECT_ID" --to-latest
-```
-
-> Mientras el tráfico esté fijado a una revisión, los deploys nuevos **no reciben tráfico** hasta que corras `--to-latest`. Todo rollback reinicia la instancia, así que **las salas en memoria se pierden**: hacelo fuera de una noche de votación.
-
-## 8. Deploy desde GitHub Actions (opcional)
-
-- `.github/workflows/ci.yml` corre en cada PR y en cada push a `main`: tests, build de la imagen, container `healthy`, `curl /healthz` y verificación de que frena limpio con SIGTERM.
-- `.github/workflows/deploy.yml` es **manual** (`workflow_dispatch`): tests → build + smoke → push a Artifact Registry → `scripts/deploy-cloudrun.sh` con `IMAGE=…`. Autentica con **Workload Identity Federation**, así que no hay JSON keys en GitHub.
-
-Setup único (corré esto en Git Bash o Cloud Shell; `REPO` = `usuario/quejugamos`):
-
-```bash
-export PROJECT_ID=... REGION=us-central1 REPO=usuario/quejugamos
-PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
-DEPLOYER=gh-deployer@$PROJECT_ID.iam.gserviceaccount.com
-RUNTIME=quejugamos-runtime@$PROJECT_ID.iam.gserviceaccount.com   # lo crea deploy-cloudrun.sh
-
-gcloud services enable iamcredentials.googleapis.com sts.googleapis.com --project "$PROJECT_ID"
-gcloud artifacts repositories create quejugamos --repository-format=docker --location="$REGION" --project "$PROJECT_ID"
-
-# Pool + provider OIDC. Solo acepta tokens de TU repo y de la rama main.
-gcloud iam workload-identity-pools create github --location=global --project "$PROJECT_ID"
-gcloud iam workload-identity-pools providers create-oidc quejugamos-repo \
-  --location=global --workload-identity-pool=github --project "$PROJECT_ID" \
-  --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-  --attribute-condition="assertion.repository=='$REPO' && assertion.ref=='refs/heads/main'"
-
-# Identidad de deploy con permisos mínimos
-gcloud iam service-accounts create gh-deployer --project "$PROJECT_ID"
-gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$DEPLOYER" --role=roles/run.admin
-gcloud artifacts repositories add-iam-policy-binding quejugamos --location="$REGION" --project "$PROJECT_ID" \
-  --member="serviceAccount:$DEPLOYER" --role=roles/artifactregistry.writer
-gcloud iam service-accounts add-iam-policy-binding "$RUNTIME" --project "$PROJECT_ID" \
-  --member="serviceAccount:$DEPLOYER" --role=roles/iam.serviceAccountUser
-gcloud iam service-accounts add-iam-policy-binding "$DEPLOYER" --project "$PROJECT_ID" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
-```
-
-En GitHub → Settings → Secrets and variables → Actions → **Variables** (no secrets: ninguna da acceso por sí sola):
-
-| Variable | Valor |
-|---|---|
-| `GCP_PROJECT_ID` | `$PROJECT_ID` |
-| `GCP_REGION` | `us-central1` |
-| `GCP_WIF_PROVIDER` | `projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/quejugamos-repo` |
-| `GCP_DEPLOY_SA` | `$DEPLOYER` |
-
-Opcional: en Settings → Environments → `production`, agregá "Required reviewers" para que cada deploy pida tu aprobación.
-
-## 9. Checklist de guardrails de costo
-
-- [ ] Budget creado (`setup-budget.sh`) y el mail de alerta llega a una casilla que leés.
-- [ ] `max-instances = 1` y `min-instances = 0`: verificar con `gcloud run services describe quejugamos --region us-central1 --format='yaml(spec.template.metadata.annotations)'`.
-- [ ] Billing **request-based** (`run.googleapis.com/cpu-throttling: 'true'`).
-- [ ] Región Tier 1 (`us-central1`).
-- [ ] Sin Load Balancer, sin Cloud SQL, sin min-instances > 0, sin VPC connector.
-- [ ] Cleanup policy en Artifact Registry (`gcloud artifacts repositories list-cleanup-policies cloud-run-source-deploy --location us-central1`).
-- [ ] Una vez por mes: Billing → Reports filtrado por el proyecto. Tiene que dar USD 0,00.
-- [ ] Backend: los streams SSE de salas expiradas se cierran y `/events` de una sala inexistente responde 4xx (si no, una pestaña olvidada factura 24/7).
-
-## 10. Alternativa: Render (free, sin tarjeta)
-
-Usala si preferís riesgo de factura cero a cambio de cold starts de ~1 min y salas que se pierden si Render reinicia el servicio (ver `HOSTING-COSTS.md`).
-
-1. Subí el repo a GitHub y entrá a <https://dashboard.render.com> → **New → Web Service** → conectá el repo.
-2. Runtime: **Docker** (usa el mismo `Dockerfile`). Instance type: **Free**. Región: la más cercana (p. ej. Ohio u Oregon).
-3. Environment: `TRUST_PROXY=1`, `STEAM_CC=ar`. `HOST=0.0.0.0` ya viene en la imagen y Render inyecta `PORT`, que la app lee.
-4. Advanced → Health Check Path: `/healthz`.
-5. **No cargues método de pago.** Sin tarjeta, al pasarte del límite Render suspende el servicio en vez de cobrar.
-
-Pendiente de validar en Render: si un SSE abierto evita el spin-down de 15 min, y el formato de `X-Forwarded-For` de su proxy (afecta al rate limit con `TRUST_PROXY=1`).
+Si Render free deja de alcanzar, por cold starts que molestan o mucho tráfico, el plan B es Cloud Run: `docs/DEPLOY-CLOUDRUN.md`. Ese camino **requiere tarjeta y no garantiza USD 0**.
