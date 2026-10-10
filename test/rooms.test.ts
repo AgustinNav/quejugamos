@@ -10,10 +10,15 @@ const fixedDeck = () => [...DECK];
 function makeStore(limits: Partial<RoomLimits> = {}) {
   const clock = { t: 1_000_000 };
   let counter = 0;
+  let seed = 42;
   const expired: string[] = [];
   const store = new RoomStore({
     now: () => clock.t,
-    randomInt: (max) => (counter++ * 7) % max,
+    // Deterministic LCG: reproducible codes without cycling through a tiny period.
+    randomInt: (max) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return Math.floor((seed / 2147483648) * max);
+    },
     uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
     onExpire: (code) => expired.push(code),
   }, limits);

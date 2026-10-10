@@ -112,7 +112,7 @@ export class RoomStore {
       lastResult: null, version: 1, hostToken: host.token, history: [], lastActivity: this.deps.now(),
     };
     this.rooms.set(code, room);
-    this.creationsByIp.get(ip)!.push(this.deps.now());
+    this.recordCreation(ip);
     return { code, hostToken: host.token, playerToken: host.token, playerId: host.id };
   }
 
@@ -218,6 +218,13 @@ export class RoomStore {
     }
     if (this.rooms.size >= this.limits.maxRooms) this.expire();
     if (this.rooms.size >= this.limits.maxRooms) throw new RoomError(503, 'capacity', 'Server is at capacity, try again later');
+  }
+
+  // Separate from assertCanCreate: expire() inside it may prune this IP's entry.
+  private recordCreation(ip: string): void {
+    const times = this.creationsByIp.get(ip) ?? [];
+    times.push(this.deps.now());
+    this.creationsByIp.set(ip, times);
   }
 
   private generateCode(): string {
