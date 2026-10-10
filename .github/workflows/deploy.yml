@@ -1,0 +1,62 @@
+# Manual deploy to Cloud Run. Keyless: GitHub's OIDC token is exchanged for short-lived GCP
+# credentials via Workload Identity Federation, so no service-account key is ever stored.
+# One-time setup: docs/DEPLOY.md, section "Deploy desde GitHub Actions".
+#
+# Required repository variables (Settings > Secrets and variables > Actions > Variables; not secrets,
+# none of them grant access on their own):
+#   GCP_PROJECT_ID     e.g. quejugamos-prod
+#   GCP_REGION         e.g. us-central1
+#   GCP_WIF_PROVIDER   projects/<NUMBER>/locations/global/workloadIdentityPools/github/providers/quejugamos-repo
+#   GCP_DEPLOY_SA      gh-deployer@<PROJECT_ID>.iam.gserviceaccount.com
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token for Workload Identity Federation
+
+concurrency:
+  group: deploy-cloudrun
+  cancel-in-progress: false # never cancel a deploy halfway
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production # optional protection rules (e.g. required reviewer) live here
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/quejugamos/app:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Run tests (never deploy red)
+        run: npm test
+
+      - name: Build and smoke test image
+        run: ./scripts/docker-smoke.sh "${IMAGE}"
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Push image to Artifact Registry
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker push "${IMAGE}"
+
+      - name: Deploy
+        env:
+          BOOTSTRAP: '0' # APIs, billing and cleanup policies are set up once by a human
+        run: ./scripts/deploy-cloudrun.sh
