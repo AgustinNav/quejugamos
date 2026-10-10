@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 export type Phase = 'lobby' | 'voting' | 'finished';
 export type Vote = 'like' | 'nope';
-export type Filters = { platforms: string[]; maxPrice: number | null; fitsGroup: boolean };
+export type Filters = { platforms: string[]; maxPrice: number | null; fitsGroup: boolean; playerCount: number | null };
 export type PublicPlayer = { id: string; name: string; isHost: boolean };
 export type CardResult = { gameId: string; likes: number; nopes: number; match: boolean };
 

@@ -136,7 +136,9 @@ function shuffle(list) {
 function buildDeck(filters, playerCount) {
   return shuffle(GAMES.filter((g) => {
     if (!g.platforms.some((p) => filters.platforms.includes(p))) return false;
-    if (filters.fitsGroup && g.players[1] < playerCount) return false;
+    if (filters.playerCount !== null) {
+      if (g.players[0] > filters.playerCount || g.players[1] < filters.playerCount) return false;
+    } else if (filters.fitsGroup && g.players[1] < playerCount) return false;
     if (filters.maxPrice === 0 && g.priceLabel !== 'Gratis') return false;
     return true;
   }).map((g) => g.id));
@@ -145,9 +147,21 @@ function buildDeck(filters, playerCount) {
 function validFilters(filters) {
   const ok = filters && Array.isArray(filters.platforms) && filters.platforms.length > 0
     && (filters.maxPrice === null || (typeof filters.maxPrice === 'number' && filters.maxPrice >= 0))
-    && typeof filters.fitsGroup === 'boolean';
+    && validPlayerCountFields(filters);
   if (!ok) throw new HttpError(400, 'invalid_filters', 'Filtros inválidos');
-  return { platforms: filters.platforms, maxPrice: filters.maxPrice, fitsGroup: filters.fitsGroup };
+  const hasCount = Object.hasOwn(filters, 'playerCount');
+  return {
+    platforms: filters.platforms, maxPrice: filters.maxPrice,
+    fitsGroup: filters.fitsGroup ?? true, playerCount: hasCount ? filters.playerCount : null,
+  };
+}
+
+// Same contract as the backend: playerCount (null or integer 1-32) makes fitsGroup optional.
+function validPlayerCountFields(filters) {
+  if (!Object.hasOwn(filters, 'playerCount')) return typeof filters.fitsGroup === 'boolean';
+  const count = filters.playerCount;
+  const countOk = count === null || (Number.isInteger(count) && count >= 1 && count <= 32);
+  return countOk && (filters.fitsGroup === undefined || typeof filters.fitsGroup === 'boolean');
 }
 
 function closeCard(room) {

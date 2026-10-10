@@ -17,7 +17,7 @@ Source of truth shared by backend and frontend. Change it only with both sides u
   "code": "K7Q2MX",
   "phase": "voting",
   "players": [{ "id": "p_1a2b3c", "name": "Agus", "isHost": true }],
-  "filters": { "platforms": ["PC"], "maxPrice": 20, "fitsGroup": true },
+  "filters": { "platforms": ["PC"], "maxPrice": 20, "fitsGroup": true, "playerCount": null },
   "deck": ["valheim", "lethal-company"],
   "index": 1,
   "votes": { "valheim": { "p_1a2b3c": "like" } },
@@ -29,6 +29,7 @@ Source of truth shared by backend and frontend. Change it only with both sides u
 ```
 
 - `filters.maxPrice`: USD number or `null` (no limit). `filters` is `null` while in `lobby`.
+- `filters.playerCount`: always present in the snapshot (`null` = automatic). See **Start filters**.
 - `votes`: every **closed** card, `playerId -> "like" | "nope"`. The open card (`deck[index]` while `voting`) is never in `votes`: nobody, not even the host, sees who voted what until it closes.
 - `currentVoters`: ids of the players who already voted on the open card (who, never what). Empty outside `voting`.
 - `lastResult`: the card that was just closed (`null` until the first one). Clients use it for the swipe animation and the "IT'S A MATCH" overlay (`match` = every player liked it).
@@ -45,7 +46,7 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB). All er
 | POST | `/api/rooms` | — | `{ "hostName": string }` | `201 { code, hostToken, playerToken, playerId }` | 400 `invalid_name`, 429 `rate_limited`, 503 `capacity` |
 | GET | `/api/rooms/:code` | — | — | `200 Snapshot` | 404 `room_not_found`, 429 `rate_limited` |
 | POST | `/api/rooms/:code/join` | — | `{ "name": string }` | `201 { playerToken, playerId }` | 400 `invalid_name`, 404, 409 `name_taken`, 409 `room_full`, 409 `room_finished` |
-| POST | `/api/rooms/:code/start` | host | `{ "filters": { platforms: string[], maxPrice: number \| null, fitsGroup: boolean } }` | `200 Snapshot` | 400 `invalid_filters`, 401, 403 `not_host`, 409 `already_started`, 422 `empty_deck` |
+| POST | `/api/rooms/:code/start` | host | `{ "filters": { platforms: string[], maxPrice: number \| null, playerCount?: number \| null, fitsGroup?: boolean } }` (see **Start filters**) | `200 Snapshot` | 400 `invalid_filters`, 401, 403 `not_host`, 409 `already_started`, 422 `empty_deck` |
 | POST | `/api/rooms/:code/vote` | player | `{ "gameId": string, "vote": "like" \| "nope" \| null }` | `200 Snapshot & { myVote }` — `myVote`: the caller's vote on the open card of the returned snapshot (`null` if none, e.g. the vote closed the card) | 400 `invalid_vote`, 401, 409 `not_current_game`, 409 `not_voting` |
 | GET | `/api/rooms/:code/me` | player | — | `200 { playerId, gameId, vote }` — the caller's vote on the open card (`gameId`/`vote` `null` when there is none). Used to restore your own vote after a reload | 401, 404 |
 | POST | `/api/rooms/:code/next` | host | `{}` | `200 Snapshot` (closes the current card even if votes are missing) | 401, 403, 409 `not_voting` |
@@ -63,6 +64,19 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB). All er
 - "One client" = its IP; for IPv6, its /64 prefix (an IPv4-mapped `::ffff:a.b.c.d` counts as the IPv4).
 - `400 bad_request`: malformed URL, NUL byte in the path, invalid `Host`.
 - `408` and connection closed: request headers + body not fully received within 10 s.
+
+## Start filters
+
+- `platforms`: a game passes if it shares at least one platform. `maxPrice`: USD or `null`; games with an unknown price always pass.
+- `playerCount`: `null` or an integer 1–32, otherwise `400 invalid_filters`.
+  - A number N keeps games that support N players online: `min <= N <= max` (`players` in `public/games.js`). The lobby's "5+" sends `5`.
+  - `null` = automatic: the legacy `fitsGroup` rule with the room's current player count.
+- `fitsGroup` (legacy, kept for older clients): `true` keeps games whose `max` >= players in the room (`min` is ignored).
+- **Precedence:**
+  1. `playerCount` is a number → it alone decides; `fitsGroup` is ignored.
+  2. `playerCount` is `null` → `fitsGroup` decides; it is optional and defaults to `true` (send `false` to disable the size filter).
+  3. `playerCount` absent (old clients) → `fitsGroup` is **required** (boolean), as before.
+- The snapshot echoes the normalized filters: both `fitsGroup` and `playerCount` are always present.
 
 ## Rules
 
