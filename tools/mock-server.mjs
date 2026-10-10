@@ -80,10 +80,23 @@ function validName(raw) {
   return name;
 }
 
+const openCardId = (room) => (room.phase === 'voting' ? room.deck[room.index] ?? null : null);
+
+// Same privacy rule as the real server: the open card only exposes WHO voted (currentVoters).
 function snapshot(room) {
-  const { code, phase, filters, deck, index, votes, lastResult, version } = room;
+  const { code, phase, filters, deck, index, lastResult, version } = room;
   const players = room.players.map(({ id, name, isHost }) => ({ id, name, isHost }));
-  return { code, phase, players, filters, deck, index, votes, lastResult, version };
+  const openId = openCardId(room);
+  const openVotes = (openId && room.votes[openId]) || {};
+  const votes = Object.fromEntries(Object.entries(room.votes).filter(([gameId]) => gameId !== openId));
+  const currentVoters = room.players.filter((p) => openVotes[p.id]).map((p) => p.id);
+  const results = Object.fromEntries(room.history.map((r) => [r.gameId, r]));
+  return { code, phase, players, filters, deck, index, votes, currentVoters, lastResult, results, version };
+}
+
+function ownVote(room, player) {
+  const gameId = openCardId(room);
+  return { playerId: player.id, gameId, vote: (gameId && room.votes[gameId]?.[player.id]) || null };
 }
 
 function getRoom(code) {
@@ -143,6 +156,7 @@ function closeCard(room) {
   const likes = Object.values(votes).filter((v) => v === 'like').length;
   const nopes = Object.values(votes).filter((v) => v === 'nope').length;
   room.lastResult = { gameId, likes, nopes, match: likes === room.players.length };
+  room.history.push(room.lastResult);
   room.index += 1;
   if (room.index >= room.deck.length) room.phase = 'finished';
 }
@@ -183,7 +197,7 @@ async function createRoom(req, res) {
   const host = { id: newPlayerId(), name, isHost: true, token: crypto.randomUUID() };
   const room = {
     code, phase: 'lobby', players: [host], hostToken: crypto.randomUUID(), filters: null, deck: [], index: 0,
-    votes: {}, lastResult: null, version: 1, clients: new Set(), botTimers: new Set(),
+    votes: {}, lastResult: null, history: [], version: 1, clients: new Set(), botTimers: new Set(),
   };
   rooms.set(code, room);
   sendJson(res, 201, { code, hostToken: room.hostToken, playerToken: host.token, playerId: host.id });
@@ -213,7 +227,7 @@ async function start(req, res, room) {
   const filters = validFilters(body.filters);
   const deck = buildDeck(filters, room.players.length);
   if (!deck.length) throw new HttpError(422, 'empty_deck', 'Ningún juego pasa los filtros');
-  Object.assign(room, { phase: 'voting', filters, deck, index: 0, votes: {}, lastResult: null });
+  Object.assign(room, { phase: 'voting', filters, deck, index: 0, votes: {}, lastResult: null, history: [] });
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
@@ -228,6 +242,26 @@ async function vote(req, res, room) {
   if (body.vote === null) delete votes[player.id];
   else votes[player.id] = body.vote;
   if (allVoted(room)) closeCard(room);
+  changed(room);
+  sendJson(res, 200, { ...snapshot(room), myVote: ownVote(room, player).vote });
+}
+
+function me(req, res, room) {
+  sendJson(res, 200, ownVote(room, auth(req, room)));
+}
+
+async function kick(req, res, room) {
+  const { playerId } = await readJson(req);
+  auth(req, room, { host: true });
+  if (typeof playerId !== 'string' || !playerId || playerId.length > 64) throw new HttpError(400, 'invalid_player', 'Jugador inválido');
+  const target = room.players.find((p) => p.id === playerId);
+  if (!target) throw new HttpError(404, 'player_not_found', 'No está en la sala');
+  if (target.isHost) throw new HttpError(409, 'cannot_kick_host', 'Al host no');
+  room.players = room.players.filter((p) => p !== target);
+  if (room.phase === 'voting') {
+    delete room.votes[room.deck[room.index]]?.[target.id];
+    if (allVoted(room)) closeCard(room);
+  }
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
@@ -246,6 +280,7 @@ async function undo(req, res, room) {
   auth(req, room, { host: true });
   if (room.phase === 'lobby' || room.index === 0) throw new HttpError(409, 'nothing_to_undo', 'Nada para deshacer');
   room.index -= 1;
+  room.history.pop();
   room.phase = 'voting';
   delete room.votes[room.deck[room.index]];
   room.lastResult = null;
@@ -255,6 +290,7 @@ async function undo(req, res, room) {
 }
 
 function events(req, res, room) {
+  if (req.method === 'HEAD') return void res.writeHead(200, { 'Content-Type': 'text/event-stream' }).end();
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write(`event: state\ndata: ${JSON.stringify(snapshot(room))}\n\n`);
   room.clients.add(res);
@@ -348,7 +384,10 @@ const ROOM_ROUTES = {
   'POST /vote': vote,
   'POST /next': next,
   'POST /undo': undo,
+  'POST /kick': kick,
+  'GET /me': me,
   'GET /events': events,
+  'HEAD /events': events,
 };
 
 async function route(req, res, pathname) {
