@@ -16,12 +16,14 @@ export type Snapshot = {
   index: number;
   votes: Record<string, Record<string, Vote>>;
   lastResult: CardResult | null;
+  // Frozen at close time, so players joining later can't turn a past match into a non-match.
+  results: Record<string, CardResult>;
   version: number;
 };
 
 type Player = PublicPlayer & { token: string };
 
-type Room = Omit<Snapshot, 'players'> & {
+type Room = Omit<Snapshot, 'players' | 'results'> & {
   players: Player[];
   hostToken: string;
   history: CardResult[];
@@ -313,6 +315,7 @@ function toSnapshot(room: Room): Snapshot {
     index: room.index,
     votes: room.votes,
     lastResult: room.lastResult,
+    results: Object.fromEntries(room.history.map((r) => [r.gameId, r])),
     version: room.version,
   });
 }

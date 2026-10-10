@@ -32,8 +32,7 @@ const STEAM_CDN = 'https://*.steamstatic.com';
 const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': [
     "default-src 'self'",
-    // cdnjs: QR generator for the host view (PLAN.md, loaded with SRI).
-    "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    "script-src 'self' https://cdn.jsdelivr.net", // QR lib is vendored under /vendor
     "style-src 'self' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     `img-src 'self' data: ${STEAM_CDN}`,
