@@ -9,7 +9,7 @@ IMAGE="${1:-quejugamos:smoke}"
 CONTAINER="quejugamos-smoke-$$"
 HOST_PORT="${HOST_PORT:-18080}"
 HEALTH_TIMEOUT_S="${HEALTH_TIMEOUT_S:-60}"
-# Docker's default stop grace period is 10 s (same as Cloud Run). A clean SIGTERM exit is well under it.
+# Docker and Cloud Run both SIGKILL 10 s after SIGTERM. Exit 137 = signal ignored (hard failure).
 MAX_STOP_S="${MAX_STOP_S:-8}"
 
 log() { printf '==> %s\n' "$*" >&2; }
@@ -47,7 +47,8 @@ start=${SECONDS}
 docker stop --time 10 "${CONTAINER}" >/dev/null
 elapsed=$((SECONDS - start))
 exit_code="$(docker inspect "${CONTAINER}" --format '{{.State.ExitCode}}')"
-(( elapsed < MAX_STOP_S )) || die "Stop took ${elapsed}s: the app ignores SIGTERM and was SIGKILLed"
+[[ "${exit_code}" != "137" ]] || die "Exit 137 after ${elapsed}s: the app ignored SIGTERM and was SIGKILLed"
 [[ "${exit_code}" == "0" || "${exit_code}" == "143" ]] || die "Unexpected exit code ${exit_code} after SIGTERM"
+(( elapsed < MAX_STOP_S )) || log "WARN: graceful stop took ${elapsed}s (close() likely hit the app's fallback timer)"
 
 log "OK: healthy, /healthz=${body}, stopped in ${elapsed}s (exit ${exit_code})"
