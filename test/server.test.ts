@@ -1,5 +1,6 @@
 import { after, afterEach, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { api, openSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
 import type { SseClient, TestServer } from './helpers.ts';
 
@@ -17,6 +18,19 @@ after(async () => {
   for (const c of sseClients) c.close();
   await srv.close();
 });
+
+/** Raw HEAD request: resolves with the status and whether the server ended the response within 1 s. */
+function headRequest(port: number, path: string): Promise<{ status: number; ended: boolean }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'HEAD' }, (res) => {
+      const timer = setTimeout(() => { req.destroy(); resolve({ status: res.statusCode ?? 0, ended: false }); }, 1000);
+      res.on('end', () => { clearTimeout(timer); resolve({ status: res.statusCode ?? 0, ended: true }); });
+      res.resume();
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 async function assertAlive() {
   const res = await api(base, 'GET', '/healthz');
@@ -106,6 +120,67 @@ describe('full flow', () => {
     assert.equal(bad.body.error, 'invalid_filters');
   });
 
+  test('kick: host removes a ghost player, the card closes and SSE gets the new snapshot', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const ghost = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana2' })).body;
+    const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const first = started.body.deck[0];
+    await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
+    await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.playerToken);
+
+    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    sseClients.push(sse);
+    await sse.waitFor((e) => e.event === 'state');
+
+    const kicked = await api(base, 'POST', `/api/rooms/${room.code}/kick`, { playerId: ghost.playerId }, room.hostToken);
+    assert.equal(kicked.status, 200);
+    assert.ok(!kicked.body.players.some((p: { id: string }) => p.id === ghost.playerId));
+    assert.equal(kicked.body.index, 1);
+    assert.deepEqual(kicked.body.lastResult, { gameId: first, likes: 2, nopes: 0, match: true });
+
+    const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === kicked.body.version);
+    assert.deepEqual(JSON.parse(event.data), kicked.body);
+
+    const stale = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: started.body.deck[1], vote: 'like' }, ghost.playerToken);
+    assert.equal(stale.status, 401);
+    assert.equal(stale.body.error, 'unauthorized');
+
+    const kickLog = srv.logs.map((l) => JSON.parse(l)).find((l) => l.event === 'player_kicked' && l.roomCode === room.code);
+    assert.ok(kickLog, 'missing player_kicked log');
+    assert.equal(kickLog.playerId, ghost.playerId);
+    assert.ok(!JSON.stringify(kickLog).includes('Ana2'), 'names must not be logged');
+  });
+
+  test('kick errors: unknown player, host, non-host, malformed id', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const path = `/api/rooms/${room.code}/kick`;
+    const cases: Array<[unknown, string | undefined, number, string]> = [
+      [{ playerId: 'p_nobody' }, room.hostToken, 404, 'player_not_found'],
+      [{ playerId: room.playerId }, room.hostToken, 409, 'cannot_kick_host'],
+      [{ playerId: room.playerId }, ana.playerToken, 403, 'not_host'],
+      [{ playerId: 42 }, room.hostToken, 400, 'invalid_player'],
+      [{}, room.hostToken, 400, 'invalid_player'],
+      [[ana.playerId], room.hostToken, 400, 'invalid_player'],
+    ];
+    for (const [body, token, status, error] of cases) {
+      const res = await api(base, 'POST', path, body, token);
+      assert.equal(res.status, status, JSON.stringify(body));
+      assert.equal(res.body.error, error);
+    }
+    await assertAlive();
+  });
+
+  test('HEAD on events answers the headers and ends without holding a stream', async () => {
+    const room = await createRoom();
+    const { status, ended } = await headRequest(srv.port, `/api/rooms/${room.code}/events`);
+    assert.equal(status, 200);
+    assert.ok(ended, 'HEAD response did not end');
+    assert.equal(srv.hub.connectionCount(room.code), 0);
+    assert.equal((await headRequest(srv.port, '/api/rooms/ZZZZZZ/events')).status, 404);
+  });
+
   test('SSE receives closed when the room expires', async () => {
     const room = await createRoom();
     const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
@@ -124,7 +199,7 @@ describe('full flow', () => {
 describe('malformed input never kills the process', () => {
   afterEach(assertAlive);
 
-  const POSTS = ['join', 'start', 'vote', 'next', 'undo'];
+  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick'];
 
   test('POST /api/rooms: broken JSON, wrong content-type, 2 KB body, bad name', async () => {
     const broken = await rawPost(base, '/api/rooms', '{"hostName": ');

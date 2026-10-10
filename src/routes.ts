@@ -5,8 +5,10 @@ import type { CatalogGame } from './deck.ts';
 import { bearerToken, readJsonBody, sendError, sendJson } from './http.ts';
 import type { Logger } from './log.ts';
 import type { RoomStore, Snapshot } from './rooms.ts';
-import { SSE_HEADERS } from './sse.ts';
 import type { SseHub } from './sse.ts';
+
+// Headers-only answer for HEAD on the events path (see roomEvents).
+const SSE_HEAD_HEADERS = { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' };
 import type { SteamClient } from './steam.ts';
 
 export type ApiDeps = {
@@ -107,7 +109,7 @@ export const kickPlayer: Handler = async (deps, { req, res, code }) => {
 export const roomEvents: Handler = (deps, { req, res, code }) => {
   const snapshot = deps.store.snapshot(code);
   // HEAD must not hold a stream slot open: answer the headers and end.
-  if (req.method === 'HEAD') return void res.writeHead(200, SSE_HEADERS).end();
+  if (req.method === 'HEAD') return void res.writeHead(200, SSE_HEAD_HEADERS).end();
   if (!deps.hub.connect(snapshot.code, res, snapshot)) {
     sendError(res, 503, 'capacity', 'Too many live connections for this room');
   }
