@@ -1,5 +1,6 @@
 import { after, afterEach, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { api, openSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
 import type { SseClient, TestServer } from './helpers.ts';
 
@@ -17,6 +18,19 @@ after(async () => {
   for (const c of sseClients) c.close();
   await srv.close();
 });
+
+/** Raw HEAD request: resolves with the status and whether the server ended the response within 1 s. */
+function headRequest(port: number, path: string): Promise<{ status: number; ended: boolean }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'HEAD' }, (res) => {
+      const timer = setTimeout(() => { req.destroy(); resolve({ status: res.statusCode ?? 0, ended: false }); }, 1000);
+      res.on('end', () => { clearTimeout(timer); resolve({ status: res.statusCode ?? 0, ended: true }); });
+      res.resume();
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 async function assertAlive() {
   const res = await api(base, 'GET', '/healthz');
@@ -63,17 +77,21 @@ describe('full flow', () => {
     const v1 = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
     assert.equal(v1.status, 200);
     assert.equal(v1.body.index, 0);
+    assert.equal(v1.body.myVote, 'like');
+    assert.deepEqual(v1.body.currentVoters, [room.playerId]);
     const v2 = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.body.playerToken);
     assert.equal(v2.body.index, 1);
     assert.deepEqual(v2.body.lastResult, { gameId: first, likes: 2, nopes: 0, match: true });
+    assert.equal(v2.body.myVote, null, 'the card closed: no vote on the new open card');
+    const { myVote: _ignored, ...v2Snapshot } = v2.body;
 
     const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === v2.body.version);
     const pushed = JSON.parse(event.data);
-    assert.deepEqual(pushed, v2.body);
+    assert.deepEqual(pushed, v2Snapshot);
     assert.ok(!event.data.includes(room.hostToken) && !event.data.includes(ana.body.playerToken));
 
     const snap = await api(base, 'GET', `/api/rooms/${room.code}`);
-    assert.deepEqual(snap.body, v2.body);
+    assert.deepEqual(snap.body, v2Snapshot);
 
     const next = await api(base, 'POST', `/api/rooms/${room.code}/next`, {}, room.hostToken);
     assert.equal(next.body.index, 2);
@@ -106,6 +124,99 @@ describe('full flow', () => {
     assert.equal(bad.body.error, 'invalid_filters');
   });
 
+  test('kick: host removes a ghost player, the card closes and SSE gets the new snapshot', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const ghost = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana2' })).body;
+    const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const first = started.body.deck[0];
+    await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
+    await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.playerToken);
+
+    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    sseClients.push(sse);
+    await sse.waitFor((e) => e.event === 'state');
+
+    const kicked = await api(base, 'POST', `/api/rooms/${room.code}/kick`, { playerId: ghost.playerId }, room.hostToken);
+    assert.equal(kicked.status, 200);
+    assert.ok(!kicked.body.players.some((p: { id: string }) => p.id === ghost.playerId));
+    assert.equal(kicked.body.index, 1);
+    assert.deepEqual(kicked.body.lastResult, { gameId: first, likes: 2, nopes: 0, match: true });
+
+    const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === kicked.body.version);
+    assert.deepEqual(JSON.parse(event.data), kicked.body);
+
+    const stale = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: started.body.deck[1], vote: 'like' }, ghost.playerToken);
+    assert.equal(stale.status, 401);
+    assert.equal(stale.body.error, 'unauthorized');
+
+    const kickLog = srv.logs.map((l) => JSON.parse(l)).find((l) => l.event === 'player_kicked' && l.roomCode === room.code);
+    assert.ok(kickLog, 'missing player_kicked log');
+    assert.equal(kickLog.playerId, ghost.playerId);
+    assert.ok(!JSON.stringify(kickLog).includes('Ana2'), 'names must not be logged');
+  });
+
+  test('open-card votes: GET and SSE without a token only show who voted; /me returns your own vote', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const first = started.body.deck[0];
+    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    sseClients.push(sse);
+    const voted = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'nope' }, ana.playerToken);
+    assert.equal(voted.body.myVote, 'nope');
+
+    const pushed = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === voted.body.version);
+    const snap = await api(base, 'GET', `/api/rooms/${room.code}`);
+    for (const body of [snap.body, JSON.parse(pushed.data)]) {
+      assert.deepEqual(body.votes, {});
+      assert.deepEqual(body.currentVoters, [ana.playerId]);
+      assert.equal(body.myVote, undefined);
+      assert.ok(!JSON.stringify(body).includes('nope'), 'open-card vote leaked');
+    }
+
+    const me = await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, ana.playerToken);
+    assert.equal(me.status, 200);
+    assert.deepEqual(me.body, { playerId: ana.playerId, gameId: first, vote: 'nope' });
+    const hostMe = await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, room.hostToken);
+    assert.deepEqual(hostMe.body, { playerId: room.playerId, gameId: first, vote: null });
+    assert.equal((await api(base, 'GET', `/api/rooms/${room.code}/me`)).status, 401);
+    const other = await createRoom();
+    assert.equal((await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, other.hostToken)).status, 401);
+    assert.equal((await api(base, 'GET', '/api/rooms/ZZZZZZ/me', undefined, ana.playerToken)).status, 404);
+    assert.equal((await api(base, 'POST', `/api/rooms/${room.code}/me`, {}, ana.playerToken)).status, 405);
+    await assertAlive();
+  });
+
+  test('kick errors: unknown player, host, non-host, malformed id', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const path = `/api/rooms/${room.code}/kick`;
+    const cases: Array<[unknown, string | undefined, number, string]> = [
+      [{ playerId: 'p_nobody' }, room.hostToken, 404, 'player_not_found'],
+      [{ playerId: room.playerId }, room.hostToken, 409, 'cannot_kick_host'],
+      [{ playerId: room.playerId }, ana.playerToken, 403, 'not_host'],
+      [{ playerId: 42 }, room.hostToken, 400, 'invalid_player'],
+      [{}, room.hostToken, 400, 'invalid_player'],
+      [[ana.playerId], room.hostToken, 400, 'invalid_player'],
+    ];
+    for (const [body, token, status, error] of cases) {
+      const res = await api(base, 'POST', path, body, token);
+      assert.equal(res.status, status, JSON.stringify(body));
+      assert.equal(res.body.error, error);
+    }
+    await assertAlive();
+  });
+
+  test('HEAD on events answers the headers and ends without holding a stream', async () => {
+    const room = await createRoom();
+    const { status, ended } = await headRequest(srv.port, `/api/rooms/${room.code}/events`);
+    assert.equal(status, 200);
+    assert.ok(ended, 'HEAD response did not end');
+    assert.equal(srv.hub.connectionCount(room.code), 0);
+    assert.equal((await headRequest(srv.port, '/api/rooms/ZZZZZZ/events')).status, 404);
+  });
+
   test('SSE receives closed when the room expires', async () => {
     const room = await createRoom();
     const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
@@ -124,7 +235,7 @@ describe('full flow', () => {
 describe('malformed input never kills the process', () => {
   afterEach(assertAlive);
 
-  const POSTS = ['join', 'start', 'vote', 'next', 'undo'];
+  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick'];
 
   test('POST /api/rooms: broken JSON, wrong content-type, 2 KB body, bad name', async () => {
     const broken = await rawPost(base, '/api/rooms', '{"hostName": ');
@@ -194,6 +305,14 @@ describe('malformed input never kills the process', () => {
     assert.equal(await rawRequest(srv.port, 'GET //\\\\evil HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n') < 500, true);
   });
 
+  test('NUL byte after decoding is a 400, not a 500 with a stack trace', async () => {
+    const res = await api(base, 'GET', '/a%00b');
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'bad_request');
+    assert.equal((await api(base, 'GET', '/vendor/%00.js')).status, 400);
+    assert.ok(!srv.logs.some((l) => JSON.parse(l).severity === 'ERROR'), 'unexpected ERROR log');
+  });
+
   test('wrong methods and unknown API paths', async () => {
     const room = await createRoom();
     const wrong = await api(base, 'GET', `/api/rooms/${room.code}/vote`);
@@ -227,6 +346,18 @@ describe('static files', () => {
     const room = await fetch(`${base}/r/ABC234`);
     assert.equal(room.status, 200);
     assert.equal(await room.text(), html);
+  });
+
+  test('hls.js is vendored and the CSP allows no third-party script origin', async () => {
+    const index = await fetch(`${base}/`);
+    const csp = index.headers.get('content-security-policy') ?? '';
+    assert.match(csp, /script-src 'self'(;|$)/);
+    assert.ok(!csp.includes('jsdelivr'), csp);
+    assert.match(await index.text(), /<script src="\/vendor\/hls\.min\.js"/);
+    const hls = await fetch(`${base}/vendor/hls.min.js`);
+    assert.equal(hls.status, 200);
+    assert.match(hls.headers.get('content-type') ?? '', /^text\/javascript/);
+    await hls.arrayBuffer();
   });
 
   test('blocks traversal', async () => {

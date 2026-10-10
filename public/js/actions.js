@@ -2,24 +2,27 @@
 import { $, toast } from './dom.js';
 import { api } from './api.js';
 import { errorMessage } from './errors.js';
-import { activeRoom, applySnapshot, renderPhase, myVote } from './room.js';
+import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
 import { currentGameId } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
 import { toggleMute } from './media.js';
 import { bindSwipe } from './swipe.js';
-import { clearSession } from './store.js';
-import { showError } from './views/error.js';
+
+// The UI was behind the server (e.g. the SSE stream died while the phone was locked).
+const STALE_STATE_ERRORS = new Set(['not_current_game', 'not_voting']);
 
 function canVote(room) {
   return Boolean(room && !room.busy && room.session && room.state?.phase === 'voting');
 }
 
-function handleActionError(room, err) {
+async function handleActionError(room, err) {
   if (err.code === 'unauthorized') {
-    clearSession(room.code);
-    return showError('unauthorized', { onRetry: () => location.reload() });
+    // Most likely the host kicked us and the SSE event hasn't arrived: the refresh shows that screen.
+    await refreshRoom(room);
+    return failRoom(room, 'unauthorized');
   }
   toast(errorMessage(err.code));
+  if (STALE_STATE_ERRORS.has(err.code)) refreshRoom(room);
 }
 
 // Applies the snapshot returned by a POST; if SSE already delivered it, just re-render.
@@ -34,8 +37,9 @@ export async function castVote(vote) {
   room.pendingVote = { gameId, vote };
   renderPhase(room); // optimistic: the button lights up right away
   try {
-    const snapshot = await api.vote(room.code, room.session.playerToken, gameId, vote);
+    const { myVote: ownVote, ...snapshot } = await api.vote(room.code, room.session.playerToken, gameId, vote);
     room.pendingVote = null;
+    setMyVote(room, currentGameId(snapshot), ownVote);
     applyResponse(room, snapshot);
   } catch (err) {
     room.pendingVote = null;
@@ -56,6 +60,20 @@ async function hostAction(call) {
 
 export const forceNext = () => hostAction(api.next);
 export const undo = () => hostAction(api.undo);
+
+// Removes a duplicate/abandoned player so they stop blocking auto-advance and matches.
+export function kickPlayer(playerId) {
+  const room = activeRoom();
+  const player = room?.state?.players.find((p) => p.id === playerId);
+  if (!room?.isHost || !player || player.isHost) return;
+  if (!window.confirm(`¿Sacar a ${player.name} de la sala?`)) return;
+  hostAction((code, token) => api.kick(code, token, playerId));
+}
+
+function onKickClick(e) {
+  const playerId = e.target.closest?.('[data-kick]')?.dataset.kick;
+  if (playerId) kickPlayer(playerId);
+}
 
 export async function startVoting(filters) {
   const room = activeRoom();
@@ -91,6 +109,8 @@ export function bindActions() {
   $('voteNopeBtn').addEventListener('click', () => castVote('nope'));
   $('nextBtn').addEventListener('click', forceNext);
   $('undoBtn').addEventListener('click', undo);
+  $('voterList').addEventListener('click', onKickClick);
+  $('lobbyPlayers').addEventListener('click', onKickClick);
   document.addEventListener('keydown', onKeydown);
   bindSwipe((vote) => castVote(vote), () => canVote(activeRoom()));
 }

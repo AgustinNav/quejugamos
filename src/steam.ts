@@ -24,6 +24,10 @@ export type SteamClientOptions = {
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 8000;
+// Negative cache: a failing app is not retried upstream for this long (callers get stale or 502).
+const FAILURE_TTL_MS = 120_000;
+// After Steam answers 429, nobody calls it for this long: hammering a rate limit only extends it.
+const RATE_LIMIT_BACKOFF_MS = 60_000;
 
 function pickMovie(movies: any[] = []) {
   const movie = movies.find((m) => m.highlight) || movies[0];
@@ -58,6 +62,8 @@ export class SteamClient {
   private readonly allowed: Set<string>;
   private readonly cache: Record<string, CacheEntry>;
   private readonly inFlight = new Map<string, Promise<GameDetails>>();
+  private readonly failedAt = new Map<string, number>();
+  private blockedUntil = 0;
 
   constructor(options: SteamClientOptions) {
     this.options = options;
@@ -78,6 +84,7 @@ export class SteamClient {
     const cached = this.cache[appId];
     if (cached && this.now() - cached.at < CACHE_TTL_MS) return Promise.resolve(cached.details);
     let pending = this.inFlight.get(appId);
+    if (!pending && this.inBackoff(appId)) return Promise.reject(new Error('Steam backoff: not retrying yet'));
     if (!pending) {
       pending = this.request(appId).finally(() => this.inFlight.delete(appId));
       this.inFlight.set(appId, pending);
@@ -101,14 +108,37 @@ export class SteamClient {
     return new Map(prices);
   }
 
+  /** Recent failure for this app, or a global pause after Steam rate-limited us. */
+  private inBackoff(appId: string): boolean {
+    const now = this.now();
+    if (now < this.blockedUntil) return true;
+    const failed = this.failedAt.get(appId);
+    if (failed === undefined) return false;
+    if (now - failed < FAILURE_TTL_MS) return true;
+    this.failedAt.delete(appId);
+    return false;
+  }
+
   private cachedOrStale(game: CatalogGame): GameDetails | null {
     return game.steamId ? this.staleDetails(String(game.steamId)) : null;
   }
 
   private async request(appId: string): Promise<GameDetails> {
+    try {
+      const details = await this.fetchDetails(appId);
+      this.failedAt.delete(appId);
+      return details;
+    } catch (err) {
+      this.failedAt.set(appId, this.now());
+      throw err;
+    }
+  }
+
+  private async fetchDetails(appId: string): Promise<GameDetails> {
     const url = `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=${this.options.country}&l=spanish`;
     const fetchImpl = this.options.fetchImpl ?? fetch;
     const res = await fetchImpl(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    if (res.status === 429) this.blockedUntil = this.now() + RATE_LIMIT_BACKOFF_MS;
     if (!res.ok) throw new Error(`Steam responded ${res.status}`);
     const entry = ((await res.json()) as any)?.[appId];
     if (!entry?.success) throw new Error(`Steam has no data for app ${appId}`);

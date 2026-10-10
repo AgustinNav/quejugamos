@@ -15,9 +15,11 @@ services:
     envVars:
       - key: STEAM_CC
         value: ar
-      # Render's X-Forwarded-For layout is undocumented. Start with 1 hop, read the
-      # `proxy_headers` log line after creating a room, adjust, then set LOG_PROXY_HEADERS=0.
+      # Render's X-Forwarded-For layout is undocumented. Start with 1 hop; to calibrate, set
+      # LOG_PROXY_HEADERS=1 in the dashboard, read the `proxy_headers` log line (docs/DEPLOY.md §4)
+      # and set it back to 0: the line contains client IPs. Blueprint sync is manual, so changing
+      # these values here does not update an existing service.
       - key: TRUSTED_PROXY_HOPS
         value: "1"
       - key: LOG_PROXY_HEADERS
-        value: "1"
+        value: "0"

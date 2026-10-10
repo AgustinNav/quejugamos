@@ -44,6 +44,49 @@ function votingRoom() {
   return { ...ctx, host, ana, bob, code: host.code };
 }
 
+describe('name validation (invisible / impersonating names)', () => {
+  const INVALID: Record<string, string> = {
+    'zero-width space only': '​',
+    'zero-width chars around a name': 'A​na',
+    'Hangul filler U+3164': 'ㅤ',
+    'Hangul choseong filler U+115F': 'Anaᅟ',
+    'Hangul jungseong filler U+1160': 'ᅠAna',
+    'halfwidth Hangul filler U+FFA0': 'ﾠ',
+    'right-to-left mark': 'Ana‏',
+    'embedded newline': 'An\na',
+    'line separator U+2028': 'An a',
+    'paragraph separator U+2029': 'An a',
+    '15 combining marks': 'a' + '́'.repeat(15),
+    '3 stacked combining marks': 'á̂̃',
+    'only punctuation': '...',
+    'only combining marks': '́̂',
+    'soft hyphen': 'An­a',
+    'ZWJ outside an emoji sequence': 'A‍na',
+  };
+  for (const [label, bad] of Object.entries(INVALID)) {
+    test(`rejects ${label}`, () => expectError(() => makeStore().store.create(bad, '1.1.1.1'), 400, 'invalid_name'));
+  }
+
+  for (const good of ['Agus', 'Ñoño', 'José', 'Juli 🎮', '42', 'éé', '👨‍👩‍👧', '1️⃣ Uno', 'Zoë']) {
+    test(`accepts ${JSON.stringify(good)}`, () => {
+      const { store } = makeStore();
+      const { code } = store.create(good, '1.1.1.1');
+      assert.equal(store.snapshot(code).players[0].name, good.normalize('NFC'));
+    });
+  }
+
+  test('uniqueness folds case, compatibility forms and invisible code points', () => {
+    const { store } = makeStore();
+    const { code } = store.create('Agus', '1.1.1.1');
+    expectError(() => store.join(code, 'ＡＧＵＳ'), 409, 'name_taken'); // fullwidth
+    expectError(() => store.join(code, 'agus️'), 409, 'name_taken'); // variation selector
+    store.join(code, 'José');
+    expectError(() => store.join(code, 'José'), 409, 'name_taken'); // decomposed accent
+    store.join(code, 'Ana 🎮');
+    expectError(() => store.join(code, 'ana 🎮️'), 409, 'name_taken');
+  });
+});
+
 describe('create', () => {
   test('returns code, tokens and host as first player', () => {
     const { store } = makeStore();
@@ -205,12 +248,35 @@ describe('vote', () => {
   test('records, changes and clears a vote', () => {
     const r = votingRoom();
     let snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    assert.deepEqual(snap.votes, { a: { [r.ana.playerId]: 'like' } });
+    assert.deepEqual(snap.currentVoters, [r.ana.playerId]);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'like');
     snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
-    assert.deepEqual(snap.votes, { a: { [r.ana.playerId]: 'nope' } });
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'nope');
     snap = r.store.vote(r.code, r.ana.playerToken, 'a', null);
-    assert.deepEqual(snap.votes, {});
+    assert.deepEqual(snap.currentVoters, []);
+    assert.deepEqual(r.store.currentVote(r.code, r.ana.playerToken), { playerId: r.ana.playerId, gameId: 'a', vote: null });
     assert.equal(snap.index, 0);
+  });
+
+  test('snapshots hide who voted what on the open card until it closes', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
+    const open = r.store.snapshot(r.code);
+    assert.deepEqual(open.votes, {});
+    assert.deepEqual(open.currentVoters, [r.ana.playerId]);
+    assert.ok(!JSON.stringify(open).includes('nope'), 'open-card vote leaked');
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    const closed = r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
+    assert.deepEqual(closed.votes.a, { [r.ana.playerId]: 'nope', [r.host.playerId]: 'like', [r.bob.playerId]: 'like' });
+    assert.deepEqual(closed.currentVoters, []);
+  });
+
+  test('currentVote rejects foreign tokens and is null outside voting', () => {
+    const r = votingRoom();
+    expectError(() => r.store.currentVote(r.code, 'nope'), 401, 'unauthorized');
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    assert.deepEqual(store.currentVote(host.code, host.playerToken), { playerId: host.playerId, gameId: null, vote: null });
   });
 
   test('version increments on change and stays on a no-op vote', () => {
@@ -333,10 +399,95 @@ describe('undo', () => {
   });
 });
 
+describe('kick', () => {
+  test('removes the player, drops their current vote and bumps the version', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
+    const before = r.store.snapshot(r.code);
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.deepEqual(snap.players.map((p) => p.id), [r.host.playerId, r.ana.playerId]);
+    assert.deepEqual(snap.currentVoters, []);
+    assert.equal(snap.index, 0);
+    assert.equal(snap.version, before.version + 1);
+  });
+
+  test('works in the lobby too', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const ana = store.join(host.code, 'Ana');
+    const snap = store.kick(host.code, host.hostToken, ana.playerId);
+    assert.equal(snap.players.length, 1);
+    assert.equal(snap.phase, 'lobby');
+    assert.ok(store.join(host.code, 'Ana').playerId, 'the name is free again');
+  });
+
+  test('kicking the only missing voter closes the card with a match', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.equal(snap.index, 1);
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, match: true });
+    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 2, nopes: 0, match: true });
+  });
+
+  test('a kicked voter does not count toward the closing result', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.bob.playerToken, 'a', 'nope');
+    r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    const snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, match: true });
+  });
+
+  test('does not close the card while remaining players are missing votes', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    assert.equal(r.store.kick(r.code, r.host.hostToken, r.bob.playerId).index, 0);
+  });
+
+  test('past results stay frozen', () => {
+    const r = votingRoom();
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
+    const before = r.store.snapshot(r.code);
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.deepEqual(snap.results, before.results);
+    assert.deepEqual(snap.votes.a, before.votes.a);
+  });
+
+  test("the kicked player's token is rejected afterwards", () => {
+    const r = votingRoom();
+    r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    expectError(() => r.store.vote(r.code, r.bob.playerToken, 'a', 'like'), 401, 'unauthorized');
+  });
+
+  test('cannot kick the host', () => {
+    const r = votingRoom();
+    expectError(() => r.store.kick(r.code, r.host.hostToken, r.host.playerId), 409, 'cannot_kick_host');
+  });
+
+  test('requires the host', () => {
+    const r = votingRoom();
+    expectError(() => r.store.kick(r.code, r.ana.playerToken, r.bob.playerId), 403, 'not_host');
+    expectError(() => r.store.kick(r.code, null, r.bob.playerId), 401, 'unauthorized');
+  });
+
+  test('unknown player is 404 and malformed ids are 400', () => {
+    const r = votingRoom();
+    const version = r.store.snapshot(r.code).version;
+    expectError(() => r.store.kick(r.code, r.host.hostToken, 'p_nobody'), 404, 'player_not_found');
+    for (const bad of [undefined, null, 42, '', 'x'.repeat(65), ['p_1']]) {
+      expectError(() => r.store.kick(r.code, r.host.hostToken, bad), 400, 'invalid_player');
+    }
+    assert.equal(r.store.snapshot(r.code).version, version, 'failed kicks do not bump the version');
+  });
+});
+
 describe('limits and expiry', () => {
   test('rooms expire after 2 h without activity', () => {
     const { store, clock, expired } = makeStore();
     const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
     clock.t += 2 * 60 * 60 * 1000;
     assert.deepEqual(store.expire(), []);
     clock.t += 1;
@@ -345,11 +496,54 @@ describe('limits and expiry', () => {
     expectError(() => store.snapshot(code), 404, 'room_not_found');
   });
 
+  test('a lobby with only the host expires after 20 min idle', () => {
+    const { store, clock, expired } = makeStore();
+    const lone = store.create('Host', '1.1.1.1');
+    const joined = store.create('Host', '1.1.1.2');
+    store.join(joined.code, 'Ana');
+    clock.t += 20 * 60 * 1000;
+    assert.deepEqual(store.expire(), []);
+    clock.t += 1;
+    assert.deepEqual(store.expire(), [lone.code]);
+    assert.deepEqual(expired, [lone.code]);
+    assert.equal(store.snapshot(joined.code).phase, 'lobby');
+  });
+
+  test('a lone host that already started voting keeps the 2 h TTL', () => {
+    const { store, clock } = makeStore();
+    const { code, hostToken } = store.create('Host', '1.1.1.1');
+    store.start(code, hostToken, FILTERS, fixedDeck);
+    clock.t += 21 * 60 * 1000;
+    assert.deepEqual(store.expire(), []);
+  });
+
+  test('at capacity, the longest-idle lone-host lobby is evicted first', () => {
+    const { store, clock, expired } = makeStore({ maxRooms: 3 });
+    const busy = store.create('Host', '10.0.0.1');
+    store.join(busy.code, 'Ana');
+    const older = store.create('Host', '10.0.0.2');
+    clock.t += 60_000;
+    const newer = store.create('Host', '10.0.0.3');
+    clock.t += 5 * 60 * 1000;
+    const created = store.create('Host', '10.0.0.4');
+    assert.deepEqual(expired, [older.code]);
+    for (const code of [busy.code, newer.code, created.code]) assert.ok(store.snapshot(code));
+  });
+
+  test('at capacity, a lobby created moments ago is not evicted', () => {
+    const { store, clock } = makeStore({ maxRooms: 2 });
+    store.create('Host', '10.0.0.1');
+    store.create('Host', '10.0.0.2');
+    clock.t += 4 * 60 * 1000;
+    expectError(() => store.create('Host', '10.0.0.3'), 503, 'capacity');
+  });
+
   test('activity extends the TTL', () => {
     const { store, clock } = makeStore();
     const { code } = store.create('Host', '1.1.1.1');
-    clock.t += 90 * 60 * 1000;
     store.join(code, 'Ana');
+    clock.t += 90 * 60 * 1000;
+    store.join(code, 'Bob');
     clock.t += 90 * 60 * 1000;
     assert.deepEqual(store.expire(), []);
   });

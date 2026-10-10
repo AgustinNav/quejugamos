@@ -40,6 +40,8 @@ export const api = {
   vote: (code, token, gameId, vote) => request('POST', roomPath(code, '/vote'), { body: { gameId, vote }, token }),
   next: (code, token) => request('POST', roomPath(code, '/next'), { body: {}, token }),
   undo: (code, token) => request('POST', roomPath(code, '/undo'), { body: {}, token }),
+  kick: (code, token, playerId) => request('POST', roomPath(code, '/kick'), { body: { playerId }, token }),
+  me: (code, token) => request('GET', roomPath(code, '/me'), { token }),
   steam: (appId) => request('GET', `/api/steam/${encodeURIComponent(appId)}`),
 };
 

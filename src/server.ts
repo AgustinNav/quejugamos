@@ -8,7 +8,8 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { GAMES, PLATFORMS } from '../public/games.js';
 import { loadConfig } from './config.ts';
 import type { AppConfig } from './config.ts';
-import { HttpError, clientIp, createRateLimiter, forwardedFor, parsePathname, safeDecode, sendError, sendJson } from './http.ts';
+import { HttpError, clientIp, createRateLimiter, forwardedFor, parsePathname, rateLimitKey, safeDecode, sendError, sendJson } from './http.ts';
+import type { RateLimiter } from './http.ts';
 import { createLogger } from './log.ts';
 import type { Logger } from './log.ts';
 import { DEFAULT_LIMITS, RoomError, RoomStore } from './rooms.ts';
@@ -32,13 +33,13 @@ const STEAM_CDN = 'https://*.steamstatic.com';
 const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' https://cdn.jsdelivr.net", // QR lib is vendored under /vendor
+    "script-src 'self'", // QR lib and hls.js are vendored under /vendor
     "style-src 'self' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     `img-src 'self' data: ${STEAM_CDN}`,
     `media-src 'self' blob: ${STEAM_CDN}`,
     `connect-src 'self' ${STEAM_CDN}`, // 'self' covers SSE; hls.js fetches trailer segments via XHR
-    "worker-src 'self' blob:",
+    "worker-src 'self' blob:", // hls.js injects its transmuxer worker from a Blob URL
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -51,7 +52,13 @@ const SECURITY_HEADERS: Record<string, string> = {
 const API_RATE_WINDOW_MS = 60_000;
 // Sized for a whole party behind one home NAT: 12 phones voting plus Steam detail lookups.
 const API_RATE_MAX = 600;
+// Unknown room codes per client per window. A real user mistypes a code a handful of times.
+const ROOM_MISS_MAX = 20;
+const HSTS = 'max-age=15552000; includeSubDomains';
 const EXPIRY_SWEEP_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 10_000;
+// Above the SSE global cap (2000) so plain requests still get through when streams are maxed out.
+const MAX_CONNECTIONS = 3000;
 const VALID_HOST = /^(?:[A-Za-z0-9.-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
 const ROOM_CODE = /^[A-Za-z0-9]{6}$/;
 
@@ -65,7 +72,9 @@ const ROUTES: Route[] = [
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/vote$/, handler: routes.voteRoom },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/next$/, handler: routes.nextCard },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/undo$/, handler: routes.undoCard },
+  { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/kick$/, handler: routes.kickPlayer },
   { method: 'GET', pattern: /^\/api\/rooms\/([^/]+)\/events$/, handler: routes.roomEvents },
+  { method: 'GET', pattern: /^\/api\/rooms\/([^/]+)\/me$/, handler: routes.myVote },
   { method: 'GET', pattern: /^\/api\/steam\/(\d{1,10})$/, handler: routes.steamDetails },
 ];
 
@@ -77,6 +86,7 @@ export type AppOptions = {
   limits?: Partial<RoomLimits>;
   sse?: SseHubOptions;
   priceTimeoutMs?: number;
+  requestTimeoutMs?: number;
 };
 
 export type App = {
@@ -118,10 +128,8 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string
   // SPA fallback: room links are rendered client-side.
   const isRoomPage = /^\/r\/[^/]+\/?$/.test(pathname);
   const decoded = pathname === '/' || isRoomPage ? '/index.html' : safeDecode(pathname);
-  if (decoded === null) {
-    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Bad request');
-    return;
-  }
+  // fs throws synchronously on a NUL byte in the path, which would surface as a 500.
+  if (decoded === null || decoded.includes('\0')) return sendError(res, 400, 'bad_request', 'Malformed URL');
   const filePath = path.normalize(path.join(publicDir, decoded.replace(/^\/+/, '')));
   // Trailing separator so a sibling like "public-secret/" can't pass the prefix check.
   if (!filePath.startsWith(publicDir + path.sep)) {
@@ -160,28 +168,58 @@ function routeApi(deps: ApiDeps, req: IncomingMessage, res: ServerResponse, path
     return sendError(res, 405, 'method_not_allowed', `Use ${route.method}`, { Allow: route.method === 'GET' ? 'GET, HEAD' : route.method });
   }
   const isRoom = pathname.startsWith('/api/rooms/');
-  if (isRoom && !ROOM_CODE.test(params[0])) return sendError(res, 404, 'room_not_found', 'Room not found');
+  if (isRoom && !ROOM_CODE.test(params[0])) throw new RoomError(404, 'room_not_found', 'Room not found');
   const ctx: RouteContext = { req, res, ip, code: isRoom ? params[0] : '', appId: isRoom ? '' : params[0] ?? '' };
   return route.handler(deps, ctx);
 }
 
+function roomMissesExceeded(): HttpError {
+  return new HttpError(429, 'rate_limited', 'Too many unknown room codes, try again in a minute');
+}
+
+/**
+ * Guessing room codes shows up as a burst of room_not_found. Past the limit every room lookup from
+ * that client is refused, hits included: otherwise a 200 among the 429s would still reveal a code.
+ */
+async function limitRoomMisses(misses: RateLimiter, ip: string, run: () => Promise<void> | void): Promise<void> {
+  if (misses.isLimited(ip)) throw roomMissesExceeded();
+  try {
+    await run();
+  } catch (err) {
+    if (err instanceof RoomError && err.code === 'room_not_found' && misses.hit(ip)) throw roomMissesExceeded();
+    throw err;
+  }
+}
+
+/** Only behind a trusted proxy: there X-Forwarded-Proto tells whether the client used HTTPS. */
+function arrivedOverHttps(req: IncomingMessage, trustedProxyHops: number): boolean {
+  if (trustedProxyHops <= 0) return false;
+  const header = req.headers['x-forwarded-proto'];
+  const value = Array.isArray(header) ? header.join(',') : header ?? '';
+  return value.split(',').at(-1)?.trim().toLowerCase() === 'https';
+}
+
 function createHandler(deps: ApiDeps, config: AppConfig) {
   const limiter = createRateLimiter(API_RATE_WINDOW_MS, API_RATE_MAX);
-  setInterval(() => limiter.prune(), API_RATE_WINDOW_MS).unref();
+  const roomMisses = createRateLimiter(API_RATE_WINDOW_MS, ROOM_MISS_MAX);
+  setInterval(() => { limiter.prune(); roomMisses.prune(); }, API_RATE_WINDOW_MS).unref();
   return async (req: IncomingMessage, res: ServerResponse) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
+    if (arrivedOverHttps(req, config.trustedProxyHops)) res.setHeader('Strict-Transport-Security', HSTS);
     const host = req.headers.host;
     if (host !== undefined && !VALID_HOST.test(host)) return sendError(res, 400, 'bad_request', 'Invalid Host header');
     const pathname = parsePathname(req.url);
     if (pathname === null) return sendError(res, 400, 'bad_request', 'Malformed URL');
     if (pathname === '/healthz') return sendJson(res, 200, { ok: true });
     if (pathname.startsWith('/api/')) {
-      const ip = clientIp(req, config.trustedProxyHops);
+      const resolvedIp = clientIp(req, config.trustedProxyHops);
+      const ip = rateLimitKey(resolvedIp);
       if (config.logProxyHeaders && req.method === 'POST' && pathname === '/api/rooms') {
-        deps.log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp: ip });
+        deps.log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp, rateKey: ip });
       }
       if (limiter.hit(ip)) return sendError(res, 429, 'rate_limited', 'Too many requests', { 'Retry-After': '60' });
-      return routeApi(deps, req, res, pathname, ip);
+      if (!pathname.startsWith('/api/rooms/')) return routeApi(deps, req, res, pathname, ip);
+      return limitRoomMisses(roomMisses, ip, () => routeApi(deps, req, res, pathname, ip));
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return void res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' }).end('Method not allowed');
@@ -195,10 +233,19 @@ export function createApp(options: AppOptions = {}): App {
   const log = options.log ?? createLogger();
   const deps = buildDeps(config, options, log);
   const handle = createHandler(deps, config);
-  const server = http.createServer((req, res) => {
+  const requestTimeout = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+  const server = http.createServer({
+    // Slowloris: a request must be fully received (headers and body) within requestTimeout.
+    // Node stops timing a request once it is received, so long-lived SSE responses are unaffected.
+    requestTimeout,
+    headersTimeout: requestTimeout,
+    // Node's default check runs every 30 s, which would stretch a 10 s timeout up to 40 s.
+    connectionsCheckingInterval: Math.min(1000, Math.max(50, Math.floor(requestTimeout / 4))),
+  }, (req, res) => {
     // Promise.resolve().then() also turns synchronous throws into rejections, so nothing escapes.
     Promise.resolve().then(() => handle(req, res)).catch((err) => handleError(err, res, log));
   });
+  server.maxConnections = MAX_CONNECTIONS;
   const sweep = setInterval(() => deps.store.expire(), EXPIRY_SWEEP_MS);
   sweep.unref();
   const close = () => new Promise<void>((resolve) => {

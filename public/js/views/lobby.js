@@ -21,7 +21,7 @@ export function currentFilters() {
 export function renderHostLobby(room) {
   const { players } = room.state;
   renderInvite(room.code);
-  renderNameList('lobbyPlayers', players, room.session.playerId);
+  renderNameList('lobbyPlayers', players, room.session.playerId, { kickable: true });
   $('lobbyCount').textContent = `(${players.length}/${MAX_PLAYERS})`;
   renderFilters();
   showScreen('lobbyHostScreen');

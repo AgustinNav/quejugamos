@@ -14,7 +14,9 @@ export type Snapshot = {
   filters: Filters | null;
   deck: string[];
   index: number;
+  // Closed cards only: open-card votes stay private until the card closes (see currentVoters).
   votes: Record<string, Record<string, Vote>>;
+  currentVoters: string[];
   lastResult: CardResult | null;
   // Frozen at close time, so players joining later can't turn a past match into a non-match.
   results: Record<string, CardResult>;
@@ -23,7 +25,9 @@ export type Snapshot = {
 
 type Player = PublicPlayer & { token: string };
 
-type Room = Omit<Snapshot, 'players' | 'results'> & {
+export type CurrentVote = { playerId: string; gameId: string | null; vote: Vote | null };
+
+type Room = Omit<Snapshot, 'players' | 'results' | 'currentVoters'> & {
   players: Player[];
   hostToken: string;
   history: CardResult[];
@@ -45,6 +49,10 @@ export type RoomLimits = {
   roomsPerIpPerWindow: number;
   ipWindowMs: number;
   ttlMs: number;
+  // A lobby nobody joined is cheap to create and costs nothing to abandon: it gets a shorter TTL.
+  lobbyTtlMs: number;
+  // At capacity, a lone-host lobby idle this long is evicted to make room for a new one.
+  lobbyEvictIdleMs: number;
 };
 
 export const DEFAULT_LIMITS: RoomLimits = {
@@ -53,14 +61,24 @@ export const DEFAULT_LIMITS: RoomLimits = {
   roomsPerIpPerWindow: 5,
   ipWindowMs: 60 * 60 * 1000,
   ttlMs: 2 * 60 * 60 * 1000,
+  lobbyTtlMs: 20 * 60 * 1000,
+  lobbyEvictIdleMs: 5 * 60 * 1000,
 };
 
 export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const CODE_LENGTH = 6;
 const NAME_MAX = 16;
 const MAX_CODE_ATTEMPTS = 50;
-// C0/C1 controls plus bidi overrides/isolates, which can visually spoof another player's name.
-const FORBIDDEN_NAME_CHARS = /[\p{Cc}‪-‮⁦-⁩]/u;
+const PLAYER_ID_MAX = 64;
+// Controls, format chars (zero-width, bidi, RLM), line/paragraph separators and the Hangul fillers
+// render as nothing or reorder text: a name made of them is invisible or impersonates another player.
+const FORBIDDEN_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}ㅤᅟᅠﾠ]/u;
+// ZWJ is \p{Cf} but glues multi-person emoji (e.g. family): allowed only between two pictographs.
+const EMOJI_ZWJ = /(?<=\p{Extended_Pictographic}[️\u{1F3FB}-\u{1F3FF}]?)‍(?=\p{Extended_Pictographic})/gu;
+const VISIBLE_NAME_CHAR = /[\p{L}\p{N}\p{Extended_Pictographic}]/u;
+// Checked on NFD so precomposed letters count their marks too (Vietnamese tops out at 2).
+const MARK_STACK = /\p{M}{3}/u;
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 
 /** Domain error carrying the HTTP status and the contract's error code. */
 export class RoomError extends Error {
@@ -77,10 +95,23 @@ export function normalizeName(input: unknown): string {
   if (typeof input !== 'string') throw new RoomError(400, 'invalid_name', 'Name must be a string');
   const name = input.normalize('NFC').trim();
   const length = [...name].length;
-  if (length < 1 || length > NAME_MAX || FORBIDDEN_NAME_CHARS.test(name)) {
-    throw new RoomError(400, 'invalid_name', `Name must be 1-${NAME_MAX} characters without control characters`);
+  const valid = length >= 1 && length <= NAME_MAX
+    && !FORBIDDEN_NAME_CHARS.test(name.replace(EMOJI_ZWJ, ''))
+    && VISIBLE_NAME_CHAR.test(name)
+    && !MARK_STACK.test(name.normalize('NFD'));
+  if (!valid) {
+    throw new RoomError(400, 'invalid_name', `Name must be 1-${NAME_MAX} visible characters (letters, digits or emoji)`);
   }
   return name;
+}
+
+/**
+ * Key for name uniqueness: compatibility forms (fullwidth, ligatures) and invisible code points fold
+ * into the same key. Cross-script look-alikes (Cyrillic "а" vs Latin "a") still differ: full
+ * confusable detection (Unicode TR39 skeletons) is out of scope.
+ */
+export function nameKey(name: string): string {
+  return name.normalize('NFKC').toLowerCase().replace(IGNORABLE, '');
 }
 
 function tokensEqual(a: string, b: string): boolean {
@@ -123,8 +154,8 @@ export class RoomStore {
     const room = this.getRoom(code);
     if (room.phase === 'finished') throw new RoomError(409, 'room_finished', 'The room already finished');
     if (room.players.length >= this.limits.maxPlayers) throw new RoomError(409, 'room_full', 'The room is full');
-    const key = name.toLowerCase();
-    if (room.players.some((p) => p.name.toLowerCase() === key)) {
+    const key = nameKey(name);
+    if (room.players.some((p) => nameKey(p.name) === key)) {
       throw new RoomError(409, 'name_taken', 'Another player already uses that name');
     }
     const player = this.newPlayer(name, false);
@@ -187,8 +218,39 @@ export class RoomStore {
     return toSnapshot(room);
   }
 
+  /**
+   * Host removes a player (duplicate entry, someone who left). Their token stops working, their vote on
+   * the current card is dropped (closed cards keep their frozen results) and, if everyone left already
+   * voted, the card closes exactly like an auto-advance.
+   */
+  kick(code: string, token: string | null, playerId: unknown): Snapshot {
+    const room = this.getRoom(code);
+    this.requireHost(room, token);
+    if (typeof playerId !== 'string' || playerId.length === 0 || playerId.length > PLAYER_ID_MAX) {
+      throw new RoomError(400, 'invalid_player', 'Expected { playerId: string }');
+    }
+    const target = room.players.find((p) => p.id === playerId);
+    if (!target) throw new RoomError(404, 'player_not_found', 'That player is not in the room');
+    if (target.isHost) throw new RoomError(409, 'cannot_kick_host', 'The host cannot be removed');
+    room.players = room.players.filter((p) => p !== target);
+    if (room.phase === 'voting') {
+      applyVote(room, target.id, room.deck[room.index], null);
+      if (everyoneVoted(room)) closeCurrentCard(room);
+    }
+    this.touch(room);
+    return toSnapshot(room);
+  }
+
   snapshot(code: string): Snapshot {
     return toSnapshot(this.getRoom(code));
+  }
+
+  /** The caller's own vote on the open card: the only way to read it before the card closes. */
+  currentVote(code: string, token: string | null): CurrentVote {
+    const room = this.getRoom(code);
+    const player = this.requirePlayer(room, token);
+    const gameId = currentCardId(room);
+    return { playerId: player.id, gameId, vote: gameId ? room.votes[gameId]?.[player.id] ?? null : null };
   }
 
   /** Removes rooms idle longer than the TTL. Returns the expired codes. */
@@ -219,6 +281,7 @@ export class RoomStore {
       throw new RoomError(429, 'rate_limited', 'Too many rooms created from this address, try again later');
     }
     if (this.rooms.size >= this.limits.maxRooms) this.expire();
+    if (this.rooms.size >= this.limits.maxRooms) this.evictIdleLobby();
     if (this.rooms.size >= this.limits.maxRooms) throw new RoomError(503, 'capacity', 'Server is at capacity, try again later');
   }
 
@@ -260,7 +323,17 @@ export class RoomStore {
   }
 
   private isExpired(room: Room): boolean {
-    return this.deps.now() - room.lastActivity > this.limits.ttlMs;
+    const ttl = isLoneHostLobby(room) ? this.limits.lobbyTtlMs : this.limits.ttlMs;
+    return this.deps.now() - room.lastActivity > ttl;
+  }
+
+  /** Frees one slot by evicting the longest-idle lone-host lobby, if it has been idle long enough. */
+  private evictIdleLobby(): void {
+    let oldest: Room | undefined;
+    for (const room of this.rooms.values()) {
+      if (isLoneHostLobby(room) && (!oldest || room.lastActivity < oldest.lastActivity)) oldest = room;
+    }
+    if (oldest && this.deps.now() - oldest.lastActivity >= this.limits.lobbyEvictIdleMs) this.remove(oldest.code);
   }
 
   private remove(code: string): string {
@@ -275,6 +348,10 @@ export class RoomStore {
       if (!times.some((at) => at > cutoff)) this.creationsByIp.delete(ip);
     }
   }
+}
+
+function isLoneHostLobby(room: Room): boolean {
+  return room.phase === 'lobby' && room.players.length === 1;
 }
 
 /** Returns true when the stored vote actually changed. */
@@ -305,7 +382,13 @@ function closeCurrentCard(room: Room): void {
   if (room.index >= room.deck.length) room.phase = 'finished';
 }
 
+function currentCardId(room: Room): string | null {
+  return room.phase === 'voting' ? room.deck[room.index] ?? null : null;
+}
+
 function toSnapshot(room: Room): Snapshot {
+  const openId = currentCardId(room);
+  const openVotes = openId ? room.votes[openId] ?? {} : {};
   return structuredClone({
     code: room.code,
     phase: room.phase,
@@ -313,7 +396,8 @@ function toSnapshot(room: Room): Snapshot {
     filters: room.filters,
     deck: room.deck,
     index: room.index,
-    votes: room.votes,
+    votes: Object.fromEntries(Object.entries(room.votes).filter(([gameId]) => gameId !== openId)),
+    currentVoters: room.players.filter((p) => openVotes[p.id] !== undefined).map((p) => p.id),
     lastResult: room.lastResult,
     results: Object.fromEntries(room.history.map((r) => [r.gameId, r])),
     version: room.version,
