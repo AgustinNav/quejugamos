@@ -194,6 +194,14 @@ describe('malformed input never kills the process', () => {
     assert.equal(await rawRequest(srv.port, 'GET //\\\\evil HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n') < 500, true);
   });
 
+  test('NUL byte after decoding is a 400, not a 500 with a stack trace', async () => {
+    const res = await api(base, 'GET', '/a%00b');
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'bad_request');
+    assert.equal((await api(base, 'GET', '/vendor/%00.js')).status, 400);
+    assert.ok(!srv.logs.some((l) => JSON.parse(l).severity === 'ERROR'), 'unexpected ERROR log');
+  });
+
   test('wrong methods and unknown API paths', async () => {
     const room = await createRoom();
     const wrong = await api(base, 'GET', `/api/rooms/${room.code}/vote`);

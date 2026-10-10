@@ -118,10 +118,8 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string
   // SPA fallback: room links are rendered client-side.
   const isRoomPage = /^\/r\/[^/]+\/?$/.test(pathname);
   const decoded = pathname === '/' || isRoomPage ? '/index.html' : safeDecode(pathname);
-  if (decoded === null) {
-    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Bad request');
-    return;
-  }
+  // fs throws synchronously on a NUL byte in the path, which would surface as a 500.
+  if (decoded === null || decoded.includes('\0')) return sendError(res, 400, 'bad_request', 'Malformed URL');
   const filePath = path.normalize(path.join(publicDir, decoded.replace(/^\/+/, '')));
   // Trailing separator so a sibling like "public-secret/" can't pass the prefix check.
   if (!filePath.startsWith(publicDir + path.sep)) {
