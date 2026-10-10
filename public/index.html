@@ -122,7 +122,9 @@
       <div class="media" id="media">
         <video id="video" playsinline muted loop></video>
         <img id="mediaImg" alt="">
-        <div class="media-actions">
+        <div class="media-actions" id="mediaActions">
+          <button class="btn gallery-btn" type="button" id="galleryBtn" title="Galería (G)" hidden>🖼 Galería</button>
+          <input class="volume-slider" type="range" id="volumeSlider" min="0" max="100" step="5" value="0" aria-label="Volumen del trailer" title="Volumen (+ / −)" hidden>
           <button class="btn round" type="button" id="muteBtn" aria-label="Activar sonido del trailer" title="Sonido (M)">🔇</button>
         </div>
       </div>
@@ -147,7 +149,7 @@
           <button class="btn ghost" type="button" id="undoBtn" title="Deshacer (Z)">↶ Deshacer</button>
           <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
         </div>
-        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido</p>
+        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
       </section>
 
       <div class="vote-bar" id="voteBar">
@@ -194,6 +196,21 @@
     <div class="match-text">IT'S A MATCH 💘</div>
     <p id="matchGame"></p>
   </div>
+
+  <dialog class="gallery" id="gallery" aria-modal="true" aria-labelledby="galleryTitle">
+    <div class="gallery-bar">
+      <h2 class="gallery-title" id="galleryTitle"></h2>
+      <span class="gallery-count" id="galleryCount" aria-live="polite"></span>
+      <button class="btn gallery-close" type="button" id="galleryClose" aria-label="Cerrar galería" title="Cerrar (Esc)">✕</button>
+    </div>
+    <div class="gallery-stage" id="galleryStage">
+      <video id="galleryVideo" playsinline controls preload="none" hidden></video>
+      <img id="galleryImg" alt="" hidden>
+      <button class="gallery-nav prev" type="button" id="galleryPrev" aria-label="Anterior" title="Anterior (←)">‹</button>
+      <button class="gallery-nav next" type="button" id="galleryNext" aria-label="Siguiente" title="Siguiente (→)">›</button>
+    </div>
+    <div class="gallery-thumbs" id="galleryThumbs" aria-label="Trailers y capturas"></div>
+  </dialog>
 
   <div class="toast" id="toast" role="alert" hidden></div>
   <p class="sr-only" id="announcer" aria-live="assertive"></p>

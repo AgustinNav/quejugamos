@@ -5,7 +5,7 @@ import { errorMessage } from './errors.js';
 import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
 import { currentGameId } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
-import { toggleMute } from './media.js';
+import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
 import { bindSwipe } from './swipe.js';
 
 // The UI was behind the server (e.g. the SSE stream died while the phone was locked).
@@ -91,6 +91,12 @@ const KEYS = {
   ArrowRight: () => castVote('like'),
   m: toggleMute,
   M: toggleMute,
+  '+': volumeUp,
+  '=': volumeUp,
+  '-': volumeDown,
+  _: volumeDown,
+  g: openCardGallery,
+  G: openCardGallery,
 };
 const HOST_KEYS = { n: forceNext, N: forceNext, z: undo, Z: undo, Backspace: undo };
 
