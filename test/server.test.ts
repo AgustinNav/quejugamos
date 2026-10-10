@@ -313,16 +313,22 @@ describe('malformed input never kills the process', () => {
       assert.equal((await rawPost(base, path, '{broken', 'application/json', room.hostToken)).status, 400);
       assert.equal((await rawPost(base, path, '{}', 'text/plain', room.hostToken)).status, 415);
       assert.equal((await rawPost(base, path, `{"name":"${'x'.repeat(OVERSIZED(action))}"}`, 'application/json', room.hostToken)).status, 413);
-      const unknown = await api(base, 'POST', `/api/rooms/ZZZZZZ/${action}`, { name: 'A' }, room.hostToken);
+      // Own client IP per action: these 404s would otherwise add up to the room-miss limit (20/min).
+      const missIp = `10.8.0.${POSTS.indexOf(action) + 1}`;
+      const unknown = await fetch(`${base}/api/rooms/ZZZZZZ/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${room.hostToken}`, 'X-Forwarded-For': missIp },
+        body: JSON.stringify({ name: 'A' }),
+      });
       assert.equal(unknown.status, 404);
-      assert.equal(unknown.body.error, 'room_not_found');
+      assert.equal(((await unknown.json()) as { error: string }).error, 'room_not_found');
       if (action !== 'join') {
         const foreign = await api(base, 'POST', path, { filters: FILTERS, gameId: 'x', vote: 'like' }, other.hostToken);
         assert.equal(foreign.status, 401);
         assert.equal(foreign.body.error, 'unauthorized');
         assert.equal((await api(base, 'POST', path, {})).status, 401);
       }
-      assert.equal((await rawRequest(srv.port, `POST /api/rooms/%E0%A4%A/${action} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}`)), 404);
+      assert.equal((await rawRequest(srv.port, `POST /api/rooms/%E0%A4%A/${action} HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: ${missIp}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}`)), 404);
     });
   }
 
