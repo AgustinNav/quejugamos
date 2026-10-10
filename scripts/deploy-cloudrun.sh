@@ -30,6 +30,10 @@ CONCURRENCY="${CONCURRENCY:-1000}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-3600}"
 # `--source` deploys push to this auto-created repo; prebuilt images go to the `gamematch` repo.
 AR_REPOS="${AR_REPOS:-cloud-run-source-deploy gamematch}"
+# Dedicated runtime identity with ZERO roles: the app calls no GCP APIs. The default compute service
+# account often has Editor on the whole project, which a compromised container would inherit.
+RUNTIME_SA_NAME="${RUNTIME_SA_NAME:-gamematch-runtime}"
+RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 KEEP_IMAGES="${KEEP_IMAGES:-3}"
 
 log() { printf '\n==> %s\n' "$*" >&2; }
@@ -55,7 +59,17 @@ enable_apis() {
     run.googleapis.com \
     cloudbuild.googleapis.com \
     artifactregistry.googleapis.com \
+    iam.googleapis.com \
     --project="${PROJECT_ID}"
+}
+
+ensure_runtime_service_account() {
+  if gcloud iam service-accounts describe "${RUNTIME_SA}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    return 0
+  fi
+  log "Creating runtime service account ${RUNTIME_SA} (no roles granted)"
+  gcloud iam service-accounts create "${RUNTIME_SA_NAME}" \
+    --project="${PROJECT_ID}" --display-name="GameMatch Cloud Run runtime (no permissions)"
 }
 
 deploy_service() {
@@ -81,6 +95,7 @@ deploy_service() {
     --concurrency="${CONCURRENCY}" \
     --timeout="${REQUEST_TIMEOUT}" \
     --set-env-vars="TRUST_PROXY=1,STEAM_CC=${STEAM_CC}" \
+    --service-account="${RUNTIME_SA}" \
     --labels="app=gamematch" \
     --quiet
 }
@@ -123,6 +138,7 @@ main() {
   if [[ "${BOOTSTRAP}" == "1" ]]; then
     require_billing
     enable_apis
+    ensure_runtime_service_account
   fi
   deploy_service
   if [[ "${BOOTSTRAP}" == "1" ]]; then
