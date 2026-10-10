@@ -178,7 +178,7 @@ function createHandler(deps: ApiDeps, config: AppConfig) {
     if (pathname.startsWith('/api/')) {
       const ip = clientIp(req, config.trustedProxyHops);
       if (config.logProxyHeaders && req.method === 'POST' && pathname === '/api/rooms') {
-        log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp: ip });
+        deps.log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp: ip });
       }
       if (limiter.hit(ip)) return sendError(res, 429, 'rate_limited', 'Too many requests', { 'Retry-After': '60' });
       return routeApi(deps, req, res, pathname, ip);
