@@ -1,5 +1,5 @@
 // Voting screen. Host and phone share this DOM; body.is-host / body.is-phone switch the layout.
-import { $, esc, showScreen, announce } from '../dom.js';
+import { $, esc, showScreen, announce, kickButton } from '../dom.js';
 import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks } from '../catalog.js';
 import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
@@ -71,9 +71,9 @@ function metaPills(game) {
   return pills;
 }
 
+// Open-card votes are private: the snapshot only lists who already voted.
 function votedCount(state) {
-  const votes = state.votes[currentGameId(state)] || {};
-  return state.players.filter((p) => votes[p.id]).length;
+  return state.currentVoters.length;
 }
 
 function renderMyVote(room, myVote) {
@@ -89,8 +89,8 @@ function renderMyVote(room, myVote) {
 
 // Shows who voted but never what they voted: the result is revealed when the card closes.
 function renderVoters(room) {
-  const votes = room.state.votes[currentGameId(room.state)] || {};
-  const items = room.state.players.map((p) => voterItem(p, Boolean(votes[p.id]), p.id === room.session.playerId));
+  const voters = new Set(room.state.currentVoters);
+  const items = room.state.players.map((p) => voterItem(p, voters.has(p.id), p.id === room.session.playerId));
   $('voterList').replaceChildren(...items);
   $('votersCount').textContent = `${votedCount(room.state)}/${room.state.players.length}`;
 }
@@ -106,6 +106,7 @@ function voterItem(player, voted, isMe) {
   mark.textContent = voted ? '✓' : '…';
   mark.setAttribute('aria-label', voted ? 'ya votó' : 'pendiente');
   li.append(name, mark);
+  if (!player.isHost) li.append(kickButton(player)); // host-only panel
   return li;
 }
 

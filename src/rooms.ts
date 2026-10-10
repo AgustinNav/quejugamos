@@ -14,7 +14,9 @@ export type Snapshot = {
   filters: Filters | null;
   deck: string[];
   index: number;
+  // Closed cards only: open-card votes stay private until the card closes (see currentVoters).
   votes: Record<string, Record<string, Vote>>;
+  currentVoters: string[];
   lastResult: CardResult | null;
   // Frozen at close time, so players joining later can't turn a past match into a non-match.
   results: Record<string, CardResult>;
@@ -23,7 +25,9 @@ export type Snapshot = {
 
 type Player = PublicPlayer & { token: string };
 
-type Room = Omit<Snapshot, 'players' | 'results'> & {
+export type CurrentVote = { playerId: string; gameId: string | null; vote: Vote | null };
+
+type Room = Omit<Snapshot, 'players' | 'results' | 'currentVoters'> & {
   players: Player[];
   hostToken: string;
   history: CardResult[];
@@ -59,6 +63,7 @@ export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const CODE_LENGTH = 6;
 const NAME_MAX = 16;
 const MAX_CODE_ATTEMPTS = 50;
+const PLAYER_ID_MAX = 64;
 // C0/C1 controls plus bidi overrides/isolates, which can visually spoof another player's name.
 const FORBIDDEN_NAME_CHARS = /[\p{Cc}‪-‮⁦-⁩]/u;
 
@@ -187,8 +192,39 @@ export class RoomStore {
     return toSnapshot(room);
   }
 
+  /**
+   * Host removes a player (duplicate entry, someone who left). Their token stops working, their vote on
+   * the current card is dropped (closed cards keep their frozen results) and, if everyone left already
+   * voted, the card closes exactly like an auto-advance.
+   */
+  kick(code: string, token: string | null, playerId: unknown): Snapshot {
+    const room = this.getRoom(code);
+    this.requireHost(room, token);
+    if (typeof playerId !== 'string' || playerId.length === 0 || playerId.length > PLAYER_ID_MAX) {
+      throw new RoomError(400, 'invalid_player', 'Expected { playerId: string }');
+    }
+    const target = room.players.find((p) => p.id === playerId);
+    if (!target) throw new RoomError(404, 'player_not_found', 'That player is not in the room');
+    if (target.isHost) throw new RoomError(409, 'cannot_kick_host', 'The host cannot be removed');
+    room.players = room.players.filter((p) => p !== target);
+    if (room.phase === 'voting') {
+      applyVote(room, target.id, room.deck[room.index], null);
+      if (everyoneVoted(room)) closeCurrentCard(room);
+    }
+    this.touch(room);
+    return toSnapshot(room);
+  }
+
   snapshot(code: string): Snapshot {
     return toSnapshot(this.getRoom(code));
+  }
+
+  /** The caller's own vote on the open card: the only way to read it before the card closes. */
+  currentVote(code: string, token: string | null): CurrentVote {
+    const room = this.getRoom(code);
+    const player = this.requirePlayer(room, token);
+    const gameId = currentCardId(room);
+    return { playerId: player.id, gameId, vote: gameId ? room.votes[gameId]?.[player.id] ?? null : null };
   }
 
   /** Removes rooms idle longer than the TTL. Returns the expired codes. */
@@ -305,7 +341,13 @@ function closeCurrentCard(room: Room): void {
   if (room.index >= room.deck.length) room.phase = 'finished';
 }
 
+function currentCardId(room: Room): string | null {
+  return room.phase === 'voting' ? room.deck[room.index] ?? null : null;
+}
+
 function toSnapshot(room: Room): Snapshot {
+  const openId = currentCardId(room);
+  const openVotes = openId ? room.votes[openId] ?? {} : {};
   return structuredClone({
     code: room.code,
     phase: room.phase,
@@ -313,7 +355,8 @@ function toSnapshot(room: Room): Snapshot {
     filters: room.filters,
     deck: room.deck,
     index: room.index,
-    votes: room.votes,
+    votes: Object.fromEntries(Object.entries(room.votes).filter(([gameId]) => gameId !== openId)),
+    currentVoters: room.players.filter((p) => openVotes[p.id] !== undefined).map((p) => p.id),
     lastResult: room.lastResult,
     results: Object.fromEntries(room.history.map((r) => [r.gameId, r])),
     version: room.version,

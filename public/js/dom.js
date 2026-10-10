@@ -40,17 +40,30 @@ export function announce(message) {
 }
 
 // Builds an <li> list with textContent only, so user names can never inject markup.
-export function renderNameList(listId, players, myId) {
+// kickable: the host's view adds a "✕" (handled by delegation on the list, see actions.js).
+export function renderNameList(listId, players, myId, { kickable = false } = {}) {
   const list = $(listId);
-  list.replaceChildren(...players.map((player) => nameChip(player, myId)));
+  list.replaceChildren(...players.map((player) => nameChip(player, myId, kickable)));
 }
 
-function nameChip(player, myId) {
+function nameChip(player, myId, kickable) {
   const li = document.createElement('li');
   li.textContent = player.name;
   if (player.isHost) li.append(badge('host'));
   if (player.id === myId) li.append(badge('vos'));
+  if (kickable && !player.isHost) li.append(kickButton(player));
   return li;
+}
+
+export function kickButton(player) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'kick-btn';
+  button.dataset.kick = player.id;
+  button.textContent = '✕';
+  button.setAttribute('aria-label', `Sacar a ${player.name} de la sala`);
+  button.title = `Sacar a ${player.name}`;
+  return button;
 }
 
 function badge(text) {

@@ -5,16 +5,18 @@ import { getGame, getDetails, loadMany, priceInfo, priceUsd, storeUrl } from '..
 const THUMBS_TO_FETCH = 10;
 let renderToken = 0;
 
-// Counts come from the server's frozen per-card result; names from the live player list.
+// Counts come only from the server's frozen per-card result (never recomputed from `votes`, see
+// CLAUDE.md Mistakes Log); `votes` only supplies the names of likers still in the room.
 function tally(state, gameId) {
   const votes = state.votes[gameId] || {};
   const likers = state.players.filter((p) => votes[p.id] === 'like').map((p) => p.name);
-  const result = state.results?.[gameId] || { likes: likers.length, nopes: 0, match: false };
-  return { likers, likes: result.likes, nopes: result.nopes, match: result.match };
+  const { likes, nopes, match } = state.results[gameId];
+  return { likers, likes, nopes, match };
 }
 
 function rankRows(state) {
   return state.deck.slice(0, state.index)
+    .filter((id) => state.results[id])
     .map((id) => getGame(id))
     .filter(Boolean)
     .map((game) => ({ game, ...tally(state, game.id) }))

@@ -205,12 +205,35 @@ describe('vote', () => {
   test('records, changes and clears a vote', () => {
     const r = votingRoom();
     let snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    assert.deepEqual(snap.votes, { a: { [r.ana.playerId]: 'like' } });
+    assert.deepEqual(snap.currentVoters, [r.ana.playerId]);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'like');
     snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
-    assert.deepEqual(snap.votes, { a: { [r.ana.playerId]: 'nope' } });
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'nope');
     snap = r.store.vote(r.code, r.ana.playerToken, 'a', null);
-    assert.deepEqual(snap.votes, {});
+    assert.deepEqual(snap.currentVoters, []);
+    assert.deepEqual(r.store.currentVote(r.code, r.ana.playerToken), { playerId: r.ana.playerId, gameId: 'a', vote: null });
     assert.equal(snap.index, 0);
+  });
+
+  test('snapshots hide who voted what on the open card until it closes', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
+    const open = r.store.snapshot(r.code);
+    assert.deepEqual(open.votes, {});
+    assert.deepEqual(open.currentVoters, [r.ana.playerId]);
+    assert.ok(!JSON.stringify(open).includes('nope'), 'open-card vote leaked');
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    const closed = r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
+    assert.deepEqual(closed.votes.a, { [r.ana.playerId]: 'nope', [r.host.playerId]: 'like', [r.bob.playerId]: 'like' });
+    assert.deepEqual(closed.currentVoters, []);
+  });
+
+  test('currentVote rejects foreign tokens and is null outside voting', () => {
+    const r = votingRoom();
+    expectError(() => r.store.currentVote(r.code, 'nope'), 401, 'unauthorized');
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    assert.deepEqual(store.currentVote(host.code, host.playerToken), { playerId: host.playerId, gameId: null, vote: null });
   });
 
   test('version increments on change and stays on a no-op vote', () => {
@@ -330,6 +353,90 @@ describe('undo', () => {
     const r = votingRoom();
     r.store.next(r.code, r.host.hostToken);
     expectError(() => r.store.undo(r.code, r.bob.playerToken), 403, 'not_host');
+  });
+});
+
+describe('kick', () => {
+  test('removes the player, drops their current vote and bumps the version', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
+    const before = r.store.snapshot(r.code);
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.deepEqual(snap.players.map((p) => p.id), [r.host.playerId, r.ana.playerId]);
+    assert.deepEqual(snap.currentVoters, []);
+    assert.equal(snap.index, 0);
+    assert.equal(snap.version, before.version + 1);
+  });
+
+  test('works in the lobby too', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const ana = store.join(host.code, 'Ana');
+    const snap = store.kick(host.code, host.hostToken, ana.playerId);
+    assert.equal(snap.players.length, 1);
+    assert.equal(snap.phase, 'lobby');
+    assert.ok(store.join(host.code, 'Ana').playerId, 'the name is free again');
+  });
+
+  test('kicking the only missing voter closes the card with a match', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.equal(snap.index, 1);
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, match: true });
+    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 2, nopes: 0, match: true });
+  });
+
+  test('a kicked voter does not count toward the closing result', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.bob.playerToken, 'a', 'nope');
+    r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    const snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, match: true });
+  });
+
+  test('does not close the card while remaining players are missing votes', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    assert.equal(r.store.kick(r.code, r.host.hostToken, r.bob.playerId).index, 0);
+  });
+
+  test('past results stay frozen', () => {
+    const r = votingRoom();
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
+    const before = r.store.snapshot(r.code);
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.deepEqual(snap.results, before.results);
+    assert.deepEqual(snap.votes.a, before.votes.a);
+  });
+
+  test("the kicked player's token is rejected afterwards", () => {
+    const r = votingRoom();
+    r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    expectError(() => r.store.vote(r.code, r.bob.playerToken, 'a', 'like'), 401, 'unauthorized');
+  });
+
+  test('cannot kick the host', () => {
+    const r = votingRoom();
+    expectError(() => r.store.kick(r.code, r.host.hostToken, r.host.playerId), 409, 'cannot_kick_host');
+  });
+
+  test('requires the host', () => {
+    const r = votingRoom();
+    expectError(() => r.store.kick(r.code, r.ana.playerToken, r.bob.playerId), 403, 'not_host');
+    expectError(() => r.store.kick(r.code, null, r.bob.playerId), 401, 'unauthorized');
+  });
+
+  test('unknown player is 404 and malformed ids are 400', () => {
+    const r = votingRoom();
+    const version = r.store.snapshot(r.code).version;
+    expectError(() => r.store.kick(r.code, r.host.hostToken, 'p_nobody'), 404, 'player_not_found');
+    for (const bad of [undefined, null, 42, '', 'x'.repeat(65), ['p_1']]) {
+      expectError(() => r.store.kick(r.code, r.host.hostToken, bad), 400, 'invalid_player');
+    }
+    assert.equal(r.store.snapshot(r.code).version, version, 'failed kicks do not bump the version');
   });
 });
 

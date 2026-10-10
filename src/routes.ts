@@ -6,6 +6,9 @@ import { bearerToken, readJsonBody, sendError, sendJson } from './http.ts';
 import type { Logger } from './log.ts';
 import type { RoomStore, Snapshot } from './rooms.ts';
 import type { SseHub } from './sse.ts';
+
+// Headers-only answer for HEAD on the events path (see roomEvents).
+const SSE_HEAD_HEADERS = { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' };
 import type { SteamClient } from './steam.ts';
 
 export type ApiDeps = {
@@ -71,9 +74,15 @@ export const startRoom: Handler = async (deps, { req, res, code }) => {
 export const voteRoom: Handler = async (deps, { req, res, code }) => {
   const body = await readJsonBody(req);
   const before = deps.store.snapshot(code);
-  const after = deps.store.vote(code, bearerToken(req), field(body, 'gameId'), field(body, 'vote'));
+  const token = bearerToken(req);
+  const after = deps.store.vote(code, token, field(body, 'gameId'), field(body, 'vote'));
   publish(deps, before, after);
-  sendJson(res, 200, after);
+  // Snapshots hide open-card votes, so the voter gets their own back here (null once the card closed).
+  sendJson(res, 200, { ...after, myVote: deps.store.currentVote(code, token).vote });
+};
+
+export const myVote: Handler = (deps, { req, res, code }) => {
+  sendJson(res, 200, deps.store.currentVote(code, bearerToken(req)));
 };
 
 export const nextCard: Handler = async (deps, { req, res, code }) => {
@@ -93,8 +102,20 @@ export const undoCard: Handler = async (deps, { req, res, code }) => {
   sendJson(res, 200, after);
 };
 
-export const roomEvents: Handler = (deps, { res, code }) => {
+export const kickPlayer: Handler = async (deps, { req, res, code }) => {
+  const body = await readJsonBody(req);
+  const playerId = field(body, 'playerId');
+  const before = deps.store.snapshot(code);
+  const after = deps.store.kick(code, bearerToken(req), playerId);
+  deps.log('player_kicked', { roomCode: after.code, playerId, players: after.players.length, phase: after.phase });
+  publish(deps, before, after);
+  sendJson(res, 200, after);
+};
+
+export const roomEvents: Handler = (deps, { req, res, code }) => {
   const snapshot = deps.store.snapshot(code);
+  // HEAD must not hold a stream slot open: answer the headers and end.
+  if (req.method === 'HEAD') return void res.writeHead(200, SSE_HEAD_HEADERS).end();
   if (!deps.hub.connect(snapshot.code, res, snapshot)) {
     sendError(res, 503, 'capacity', 'Too many live connections for this room');
   }
