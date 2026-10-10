@@ -88,14 +88,21 @@ export function bearerToken(req: IncomingMessage): string | null {
  * entry becomes the LB address: limits then collapse to one shared bucket (fail-closed, never
  * spoofable) and this must be changed to the second-to-last entry.
  */
-export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
-  const socketIp = req.socket.remoteAddress ?? 'unknown';
-  if (!trustProxy) return socketIp;
+export function forwardedFor(req: IncomingMessage): string[] {
   const header = req.headers['x-forwarded-for'];
   const value = Array.isArray(header) ? header.join(',') : header;
-  const entries = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const last = entries.at(-1);
-  return last && /^[0-9A-Fa-f.:]{2,45}$/.test(last) ? last : socketIp;
+  return (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * `trustedProxyHops` = proxies that append to X-Forwarded-For before us: the client IP is the
+ * entry that many positions from the right. Entries further left are client-controlled.
+ */
+export function clientIp(req: IncomingMessage, trustedProxyHops: number): string {
+  const socketIp = req.socket.remoteAddress ?? 'unknown';
+  if (trustedProxyHops <= 0) return socketIp;
+  const candidate = forwardedFor(req).at(-trustedProxyHops);
+  return candidate && /^[0-9A-Fa-f.:]{2,45}$/.test(candidate) ? candidate : socketIp;
 }
 
 export type RateLimiter = { hit: (key: string) => boolean; prune: () => void };
