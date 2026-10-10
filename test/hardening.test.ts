@@ -110,7 +110,7 @@ describe('room code guessing (L4)', () => {
     }
     const blocked = await get('/api/rooms/ZZZZZZ', ip);
     assert.equal(blocked.status, 429);
-    assert.equal((await blocked.json()).error, 'rate_limited');
+    assert.equal(((await blocked.json()) as { error: string }).error, 'rate_limited');
     // A valid code must not answer 200 now, or the 429s would still leak which codes exist.
     assert.equal((await get(`/api/rooms/${room.code}`, ip)).status, 429);
     assert.equal((await get(`/api/rooms/${room.code}`, nextIp())).status, 200, 'other clients unaffected');
