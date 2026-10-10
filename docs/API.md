@@ -22,6 +22,7 @@ Source of truth shared by backend and frontend. Change it only with both sides u
   "index": 0,
   "votes": { "lethal-company": { "p_1a2b3c": "like" } },
   "lastResult": { "gameId": "valheim", "likes": 3, "nopes": 0, "match": true },
+  "results": { "valheim": { "gameId": "valheim", "likes": 3, "nopes": 0, "match": true } },
   "version": 17
 }
 ```
@@ -29,6 +30,8 @@ Source of truth shared by backend and frontend. Change it only with both sides u
 - `filters.maxPrice`: USD number or `null` (no limit). `filters` is `null` while in `lobby`.
 - `votes`: every voted card, `playerId -> "like" | "nope"`.
 - `lastResult`: the card that was just closed (`null` until the first one). Clients use it for the swipe animation and the "IT'S A MATCH" overlay (`match` = every player liked it).
+- `results`: every closed card, frozen when it closed (`undo` removes the reopened card). Use it for the ranking instead of recomputing from `votes`: players who join later must not change past results.
+- After `undo`, `lastResult` is `null`.
 - `version`: increases by 1 on every change. Clients ignore snapshots with a version ≤ the one they have.
 
 ## Endpoints

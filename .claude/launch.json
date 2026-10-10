@@ -4,7 +4,7 @@
     {
       "name": "gamematch",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["server.js"],
+      "runtimeArgs": ["src/server.ts"],
       "port": 3000
     }
   ]
