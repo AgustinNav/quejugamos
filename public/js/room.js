@@ -3,6 +3,7 @@ import { $, setLoading } from './dom.js';
 import { api, openEvents } from './api.js';
 import { loadSession, saveSession, clearSession } from './store.js';
 import { resetMedia } from './media.js';
+import { startKeepAlive } from './keepalive.js';
 import { flyOut, resetCard } from './swipe.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
@@ -17,7 +18,7 @@ let active = null;
 export const activeRoom = () => active;
 
 export function enterRoom(code) {
-  const room = { code, session: null, isHost: false, state: null, es: null, busy: false, disposed: false, pendingVote: null, retryTimer: null };
+  const room = { code, session: null, isHost: false, state: null, es: null, busy: false, disposed: false, pendingVote: null, retryTimer: null, stopKeepAlive: startKeepAlive(code) };
   active = room;
   showRoomBadge(code);
   boot(room);
@@ -26,6 +27,7 @@ export function enterRoom(code) {
 
 function leaveRoom(room) {
   room.disposed = true;
+  room.stopKeepAlive();
   room.es?.close();
   clearTimeout(room.retryTimer);
   resetMedia();
@@ -67,6 +69,7 @@ function forgetSession(room) {
 
 function failRoom(room, code) {
   if (code === 'room_not_found' || code === 'closed') clearSession(room.code);
+  room.stopKeepAlive();
   room.es?.close();
   resetMedia();
   setConnBadge(false);

@@ -26,7 +26,7 @@ export async function startTestServer(options: AppOptions = {}): Promise<TestSer
     now: () => clock.t,
     priceTimeoutMs: 500,
     ...options,
-    config: { port: 0, host: '127.0.0.1', cacheFile: null, trustProxy: false, ...options.config },
+    config: { port: 0, host: '127.0.0.1', cacheFile: null, trustedProxyHops: 0, logProxyHeaders: false, ...options.config },
   });
   return Object.assign(server, { logs, steamCalls, clock });
 }

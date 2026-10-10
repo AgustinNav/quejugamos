@@ -8,7 +8,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { GAMES, PLATFORMS } from '../public/games.js';
 import { loadConfig } from './config.ts';
 import type { AppConfig } from './config.ts';
-import { HttpError, clientIp, createRateLimiter, parsePathname, safeDecode, sendError, sendJson } from './http.ts';
+import { HttpError, clientIp, createRateLimiter, forwardedFor, parsePathname, safeDecode, sendError, sendJson } from './http.ts';
 import { createLogger } from './log.ts';
 import type { Logger } from './log.ts';
 import { DEFAULT_LIMITS, RoomError, RoomStore } from './rooms.ts';
@@ -176,7 +176,10 @@ function createHandler(deps: ApiDeps, config: AppConfig) {
     if (pathname === null) return sendError(res, 400, 'bad_request', 'Malformed URL');
     if (pathname === '/healthz') return sendJson(res, 200, { ok: true });
     if (pathname.startsWith('/api/')) {
-      const ip = clientIp(req, config.trustProxy);
+      const ip = clientIp(req, config.trustedProxyHops);
+      if (config.logProxyHeaders && req.method === 'POST' && pathname === '/api/rooms') {
+        deps.log('proxy_headers', { forwardedFor: forwardedFor(req), socketIp: req.socket.remoteAddress, resolvedIp: ip });
+      }
       if (limiter.hit(ip)) return sendError(res, 429, 'rate_limited', 'Too many requests', { 'Retry-After': '60' });
       return routeApi(deps, req, res, pathname, ip);
     }
@@ -230,7 +233,7 @@ async function main(): Promise<void> {
     process.exit(1);
   });
   const app = await startServer({ log });
-  log('server_started', { url: app.url, steamCountry: app.config.country, trustProxy: app.config.trustProxy });
+  log('server_started', { url: app.url, steamCountry: app.config.country, trustedProxyHops: app.config.trustedProxyHops });
   const shutdown = (signal: string) => {
     log('server_stopping', { signal, sseConnections: app.hub.connectionCount() });
     setTimeout(() => process.exit(0), 8000).unref();

@@ -1,0 +1,23 @@
+# Render Blueprint: free web service (no payment method on the account = can't be billed;
+# over the free limits Render suspends the service until next month instead of charging).
+services:
+  - type: web
+    name: quejugamos
+    runtime: docker
+    plan: free
+    # Closest Render region to Argentina.
+    region: virginia
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    # Deploy only after GitHub Actions CI (tests + docker smoke) passes on main.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: STEAM_CC
+        value: ar
+      # Render's X-Forwarded-For layout is undocumented. Start with 1 hop, read the
+      # `proxy_headers` log line after creating a room, adjust, then set LOG_PROXY_HEADERS=0.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      - key: LOG_PROXY_HEADERS
+        value: "1"

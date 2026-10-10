@@ -3,7 +3,17 @@
 **Fecha de relevamiento:** 2026-10-09 · **Autor:** Claude (agente infra) para Agus · **Versión:** 1.0
 **Audiencia:** Agus (decisión de hosting) · **Objetivo:** elegir el hosting más barato con el menor riesgo de factura sorpresa para una app de 1 instancia con SSE.
 
-## TL;DR
+## Decisión final (2026-10-09)
+
+**Render free, sin tarjeta cargada.** Agus pidió *garantía* de USD 0, no USD 0 esperado: sin medio de pago, Render suspende el servicio al pasarse de los límites en vez de cobrar ([render.com/docs/free](https://render.com/docs/free)). Cloud Run queda como plan B (`docs/DEPLOY-CLOUDRUN.md`).
+
+Descartados en esta ronda:
+- **Netlify:** funciones efímeras sin proceso persistente (no sirve para salas en memoria + SSE) y créditos que se consumen por deploy.
+- **Cloudflare Workers + Durable Objects:** el plan Free no factura y no tiene cold start, pero exige reescribir el backend. Candidato para una v3 si la app crece.
+
+Mitigaciones aplicadas para Render: heartbeat del frontend cada 4 min solo con la pestaña visible (`public/js/keepalive.js`), porque SSE no cuenta como tráfico entrante, y `TRUSTED_PROXY_HOPS` configurable porque el formato de `X-Forwarded-For` en Render no está documentado.
+
+## TL;DR (relevamiento original del agente de infra)
 
 - **Recomendación: Google Cloud Run, billing request-based, `us-central1`, `max-instances=1`.** Costo realista: **USD 0/mes**. El free tier cubre ~50 h/mes con al menos una conexión SSE abierta, y 20 noches × 2 h son 40 h.
 - **Riesgo principal:** una conexión SSE abierta factura como tiempo activo. Una pestaña olvidada que reconecta sin parar, o un abuso que mantenga streams abiertos, factura 24/7. El techo teórico es **~USD 60/mes** (1 instancia × 720 h). `max-instances=1` acota ese techo, pero GCP **no tiene tope duro de gasto**: los budgets solo mandan alertas. La mitigación de fondo la hace el backend (ver "Riesgos").

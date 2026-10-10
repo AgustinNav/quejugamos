@@ -9,18 +9,27 @@ function fakeReq(headers: Record<string, string | string[]>, remoteAddress = '12
 }
 
 describe('clientIp', () => {
-  test('ignores X-Forwarded-For unless TRUST_PROXY is on', () => {
-    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '1.2.3.4' }), false), '127.0.0.1');
+  test('ignores X-Forwarded-For with 0 trusted hops', () => {
+    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '1.2.3.4' }), 0), '127.0.0.1');
   });
 
   test('uses the rightmost entry, which the client cannot forge', () => {
-    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '6.6.6.6, 203.0.113.7' }), true), '203.0.113.7');
-    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '2001:db8::1' }), true), '2001:db8::1');
+    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '6.6.6.6, 203.0.113.7' }), 1), '203.0.113.7');
+    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '2001:db8::1' }), 1), '2001:db8::1');
+  });
+
+  test('with 2 hops skips the proxy entry and ignores forged entries further left', () => {
+    const req = fakeReq({ 'x-forwarded-for': '6.6.6.6, 203.0.113.7, 10.0.0.9' });
+    assert.equal(clientIp(req, 2), '203.0.113.7');
+  });
+
+  test('falls back to the socket address when there are fewer entries than hops', () => {
+    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '203.0.113.7' }), 2), '127.0.0.1');
   });
 
   test('falls back to the socket address on missing or garbage header', () => {
-    assert.equal(clientIp(fakeReq({}), true), '127.0.0.1');
-    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '1.1.1.1, <script>' }), true), '127.0.0.1');
+    assert.equal(clientIp(fakeReq({}), 1), '127.0.0.1');
+    assert.equal(clientIp(fakeReq({ 'x-forwarded-for': '1.1.1.1, <script>' }), 1), '127.0.0.1');
   });
 });
 

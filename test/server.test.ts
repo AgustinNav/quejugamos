@@ -10,7 +10,7 @@ let base: string;
 const sseClients: SseClient[] = [];
 
 before(async () => {
-  srv = await startTestServer({ config: { trustProxy: true } });
+  srv = await startTestServer({ config: { trustedProxyHops: 1 } });
   base = `http://127.0.0.1:${srv.port}`;
 });
 after(async () => {
