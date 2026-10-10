@@ -98,6 +98,19 @@ describe('helpers', () => {
     assert.equal(limiter.hit('a'), false);
   });
 
+  test('rate limiter isLimited peeks without counting and resets with the window', () => {
+    const clock = { t: 0 };
+    const limiter = createRateLimiter(1000, 1, () => clock.t);
+    assert.equal(limiter.isLimited('a'), false);
+    limiter.hit('a');
+    assert.equal(limiter.isLimited('a'), false);
+    assert.equal(limiter.isLimited('a'), false, 'peeking must not count');
+    limiter.hit('a');
+    assert.equal(limiter.isLimited('a'), true);
+    clock.t = 1001;
+    assert.equal(limiter.isLimited('a'), false);
+  });
+
   test('logger writes one JSON line with severity', () => {
     const lines: string[] = [];
     createLogger((l) => lines.push(l))('room_created', { roomCode: 'ABC234' });

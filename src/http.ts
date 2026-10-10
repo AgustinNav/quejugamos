@@ -150,12 +150,16 @@ export function rateLimitKey(ip: string): string {
   return `${groups.slice(0, 4).map((g) => g.toString(16)).join(':')}::/64`;
 }
 
-export type RateLimiter ={ hit: (key: string) => boolean; prune: () => void };
+export type RateLimiter = { hit: (key: string) => boolean; isLimited: (key: string) => boolean; prune: () => void };
 
-/** Fixed-window counter. hit() returns true when the key is over the limit. */
+/** Fixed-window counter. hit() returns true when the key is over the limit; isLimited() checks without counting. */
 export function createRateLimiter(windowMs: number, max: number, now: () => number = Date.now): RateLimiter {
   const counts = new Map<string, { start: number; count: number }>();
   return {
+    isLimited(key) {
+      const entry = counts.get(key);
+      return entry !== undefined && now() - entry.start <= windowMs && entry.count > max;
+    },
     hit(key) {
       const at = now();
       const entry = counts.get(key);
