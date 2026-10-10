@@ -2,62 +2,128 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>GameMatch</title>
+  <meta name="description" content="Elegí a qué jugar con tus amigos: cada uno vota desde su celu, swipe a la derecha o a la izquierda, y cuando a todos les gusta el mismo juego… ¡match!">
+  <meta name="theme-color" content="#0e0f14">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="GameMatch">
+  <meta property="og:title" content="GameMatch">
+  <meta property="og:description" content="Elegí a qué jugar con tus amigos: cada uno vota desde su celu y cuando a todos les gusta el mismo juego… ¡match! 💘">
+  <meta property="og:image" content="/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="GameMatch: votá con tus amigos a qué jugar">
+  <meta property="og:locale" content="es_AR">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="GameMatch">
+  <meta name="twitter:description" content="Elegí a qué jugar con tus amigos: cada uno vota desde su celu y cuando a todos les gusta el mismo juego… ¡match! 💘">
+  <meta name="twitter:image" content="/og-image.png">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js" integrity="sha384-w6Gb3fXHb5e1LUYa/hYA5Q41bEDglN5ZPCG7Jvnoo8/X90oGnlPqBlBJCe38mEMm" crossorigin="anonymous"></script>
+  <script src="/vendor/qrcode.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <h1 class="logo">Game<span>Match</span> 🎮</h1>
-    <div class="topbar-actions" id="topbarActions" hidden>
-      <span class="progress" id="progress"></span>
-      <button class="btn ghost" id="undoBtn" title="Deshacer (Backspace)">↶ Deshacer</button>
-      <button class="btn ghost" id="resultsBtn">🏆 Resultados</button>
-      <button class="btn ghost" id="setupBtn">⚙️ Config</button>
+    <a class="logo" href="/" id="logoLink">Game<span>Match</span> 🎮</a>
+    <div class="topbar-info">
+      <span class="room-badge" id="roomBadge" hidden></span>
+      <span class="progress" id="progress" hidden></span>
+      <span class="conn-badge" id="connBadge" role="status" hidden>Reconectando…</span>
     </div>
   </header>
 
-  <!-- SETUP -->
-  <main class="screen" id="setupScreen">
-    <section class="panel setup">
-      <h2>¿Quiénes juegan?</h2>
-      <form class="add-player" id="addPlayerForm">
-        <input id="playerInput" maxlength="16" placeholder="Nombre del amigo" autocomplete="off">
-        <button class="btn primary" type="submit">Agregar</button>
+  <!-- LANDING -->
+  <main class="screen" id="landingScreen" hidden>
+    <section class="hero">
+      <h1>¿A qué jugamos hoy?</h1>
+      <p class="tagline">Cada uno vota desde su celu, swipe a la derecha o a la izquierda. Cuando a todos les gusta el mismo juego: <strong>match</strong> 💘</p>
+    </section>
+    <div class="landing-forms">
+      <form class="panel form-card" id="createForm" novalidate>
+        <h2>Crear sala</h2>
+        <p class="muted">Ideal para la PC o la tele: ahí aparece el QR para que escaneen los demás.</p>
+        <label for="hostName">Tu nombre</label>
+        <input id="hostName" name="hostName" maxlength="16" autocomplete="nickname" placeholder="Ej: Agus" required>
+        <button class="btn primary big" type="submit" id="createBtn">Crear sala 🔥</button>
+        <p class="form-error" id="createError" role="alert"></p>
       </form>
-      <ul class="player-chips" id="playerChips"></ul>
+      <form class="panel form-card" id="joinCodeForm" novalidate>
+        <h2>Unirme</h2>
+        <p class="muted">¿Te pasaron un código? Ponelo acá.</p>
+        <label for="joinCode">Código de la sala</label>
+        <input id="joinCode" name="joinCode" class="code-input" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7Q2MX" required>
+        <button class="btn ghost big" type="submit">Unirme →</button>
+        <p class="form-error" id="joinCodeError" role="alert"></p>
+      </form>
+    </div>
+  </main>
 
+  <!-- JOIN (room link without a session) -->
+  <main class="screen" id="joinScreen" hidden>
+    <form class="panel form-card narrow" id="joinForm" novalidate>
+      <h2>Te invitaron a la sala <span class="code-text" id="joinRoomCode"></span></h2>
+      <p class="muted" id="joinWho"></p>
+      <label for="joinName">¿Cómo te llamás?</label>
+      <input id="joinName" name="joinName" maxlength="16" autocomplete="nickname" placeholder="Tu nombre" required>
+      <button class="btn primary big" type="submit" id="joinBtn">Entrar a votar</button>
+      <p class="form-error" id="joinError" role="alert"></p>
+    </form>
+  </main>
+
+  <!-- LOBBY: host -->
+  <main class="screen" id="lobbyHostScreen" hidden>
+    <section class="panel invite">
+      <h2>Escaneá para unirte</h2>
+      <img class="qr" id="qrImg" alt="Código QR con el link de la sala" width="320" height="320">
+      <p class="invite-url" id="inviteUrl"></p>
+      <p class="invite-code">Código: <span class="code-text big-code" id="inviteCode"></span></p>
+      <button class="btn ghost" type="button" id="copyLinkBtn">📋 Copiar link</button>
+    </section>
+    <section class="panel lobby-side">
+      <h2>En la sala <span class="count" id="lobbyCount"></span></h2>
+      <ul class="player-chips" id="lobbyPlayers" aria-live="polite"></ul>
       <h2>Filtros</h2>
       <div class="filter">
-        <label>Plataformas (que esté en al menos una)</label>
-        <div class="platform-toggles" id="platformToggles"></div>
+        <span class="filter-label" id="platformsLabel">Plataformas (que esté en al menos una)</span>
+        <div class="platform-toggles" id="platformToggles" role="group" aria-labelledby="platformsLabel"></div>
       </div>
       <div class="filter">
         <label for="maxPrice">Precio máximo: <strong id="maxPriceLabel"></strong></label>
-        <input type="range" id="maxPrice" min="0" max="70" step="5">
+        <input type="range" id="maxPrice" min="0" max="70" step="5" value="70">
       </div>
       <div class="filter">
-        <label class="check"><input type="checkbox" id="fitsGroup"> Solo juegos donde entremos todos</label>
+        <label class="check"><input type="checkbox" id="fitsGroup" checked> Solo juegos donde entremos todos</label>
       </div>
-      <button class="btn primary big" id="startBtn">Empezar a swipear 🔥</button>
-      <p class="hint" id="setupHint"></p>
+      <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
+      <p class="form-error" id="startError" role="alert"></p>
     </section>
   </main>
 
-  <!-- SWIPE -->
-  <main class="screen" id="swipeScreen" hidden>
-    <article class="card" id="card">
-      <div class="stamp like">LIKE</div>
-      <div class="stamp nope">NOPE</div>
-      <div class="media">
+  <!-- LOBBY: player -->
+  <main class="screen" id="lobbyPlayerScreen" hidden>
+    <section class="panel form-card narrow">
+      <h2>¡Adentro! 🙌</h2>
+      <p class="waiting" id="lobbyWaiting" aria-live="polite"></p>
+      <h3>En la sala <span class="count" id="lobbyPlayerCount"></span></h3>
+      <ul class="player-chips" id="lobbyPlayersPhone"></ul>
+    </section>
+  </main>
+
+  <!-- VOTING (host and phone share the DOM, the layout changes by body class) -->
+  <main class="screen" id="votingScreen" hidden>
+    <article class="card" id="card" aria-label="Juego actual">
+      <div class="stamp like" aria-hidden="true">LIKE</div>
+      <div class="stamp nope" aria-hidden="true">NOPE</div>
+      <div class="media" id="media">
         <video id="video" playsinline muted loop></video>
         <img id="mediaImg" alt="">
         <div class="media-actions">
-          <button class="btn round" id="muteBtn" title="Sonido (M)">🔇</button>
+          <button class="btn round" type="button" id="muteBtn" aria-label="Activar sonido del trailer" title="Sonido (M)">🔇</button>
         </div>
       </div>
       <div class="shots" id="shots"></div>
@@ -74,13 +140,21 @@
       <p class="steam-desc" id="gameSteamDesc"></p>
       <div class="links" id="gameLinks"></div>
 
-      <div class="votes">
-        <h3>Votos <small>teclas 1-9 · → siguiente · ← deshacer</small></h3>
-        <ul id="voteList"></ul>
-        <div class="vote-actions">
-          <button class="btn nope-btn" id="allNopeBtn">✕ Nope a todos</button>
-          <button class="btn primary" id="nextBtn">Siguiente →</button>
-          <button class="btn like-btn" id="allLikeBtn">♥ Like a todos</button>
+      <section class="voters host-only" aria-labelledby="votersTitle">
+        <h3 id="votersTitle">¿Quién votó? <span class="count" id="votersCount"></span></h3>
+        <ul class="voter-list" id="voterList"></ul>
+        <div class="host-controls">
+          <button class="btn ghost" type="button" id="undoBtn" title="Deshacer (Z)">↶ Deshacer</button>
+          <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
+        </div>
+        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido</p>
+      </section>
+
+      <div class="vote-bar" id="voteBar">
+        <p class="vote-status" id="voteStatus" aria-live="polite"></p>
+        <div class="vote-buttons">
+          <button class="vote-btn nope" type="button" id="voteNopeBtn" aria-pressed="false" aria-label="No me copa (nope)">👎</button>
+          <button class="vote-btn like" type="button" id="voteLikeBtn" aria-pressed="false" aria-label="Me copa (like)">👍</button>
         </div>
       </div>
     </aside>
@@ -91,18 +165,29 @@
     <section class="panel results">
       <div class="results-head">
         <h2>🏆 Ranking</h2>
-        <div>
-          <button class="btn ghost" id="backToSwipeBtn">Seguir votando</button>
-          <button class="btn danger" id="resetBtn">Reiniciar votación</button>
-        </div>
+        <a class="btn ghost" href="/" id="newRoomLink">Nueva sala</a>
       </div>
+      <p class="muted" id="resultsNote"></p>
       <ol class="ranking" id="ranking"></ol>
+    </section>
+  </main>
+
+  <!-- ERROR -->
+  <main class="screen" id="errorScreen" hidden>
+    <section class="panel form-card narrow error-card">
+      <p class="error-emoji" aria-hidden="true">😵</p>
+      <h2 id="errorTitle" tabindex="-1"></h2>
+      <p id="errorMessage"></p>
+      <div class="error-actions">
+        <button class="btn ghost" type="button" id="errorRetryBtn" hidden>Reintentar</button>
+        <a class="btn primary" href="/" id="errorHomeLink">Ir al inicio</a>
+      </div>
     </section>
   </main>
 
   <div class="loading" id="loading" hidden>
     <div class="spinner"></div>
-    <p id="loadingText">Cargando juegos…</p>
+    <p id="loadingText">Cargando…</p>
   </div>
 
   <div class="match-overlay" id="matchOverlay" hidden>
@@ -110,6 +195,7 @@
     <p id="matchGame"></p>
   </div>
 
-  <script type="module" src="app.js"></script>
+  <div class="toast" id="toast" role="alert" hidden></div>
+  <p class="sr-only" id="announcer" aria-live="assertive"></p>
 </body>
 </html>

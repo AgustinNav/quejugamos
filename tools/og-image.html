@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- Source of public/og-image.png (1200x630). Regenerate with:
+     msedge --headless --disable-gpu --hide-scrollbars --window-size=1200,630 --screenshot=public/og-image.png tools/og-image.html -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=block" rel="stylesheet">
+<style>
+  :root { --bg: #0e0f14; --panel: #171923; --border: #2c3040; --text: #f1f2f6; --muted: #9aa0b4;
+          --accent: #ff4f7b; --accent-2: #ff8a3d; --like: #2fd17a; --nope: #ff4f5e; --gold: #ffc542; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    font-family: 'Space Grotesk', system-ui, sans-serif; color: var(--text);
+    background: radial-gradient(circle at 15% -10%, #3a1840 0%, transparent 50%),
+                radial-gradient(circle at 100% 110%, #3a2010 0%, transparent 45%), var(--bg);
+    display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; padding: 0 72px; gap: 40px;
+  }
+  .logo { white-space: nowrap; font-size: 84px; font-weight: 700; letter-spacing: -3px; margin: 0; line-height: 1; }
+  .grad { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tag { font-size: 36px; font-weight: 500; margin: 28px 0 0; line-height: 1.25; }
+  .sub { font-size: 25px; color: var(--muted); margin: 18px 0 0; line-height: 1.4; }
+  .stack { position: relative; height: 470px; }
+  .card { position: absolute; width: 330px; height: 420px; border-radius: 26px; border: 1px solid var(--border);
+          background: linear-gradient(160deg, #2b2440, #171923 60%); box-shadow: 0 30px 70px rgba(0,0,0,.6); overflow: hidden; }
+  .card .media { height: 230px; background: linear-gradient(135deg, #3a1d4a, #1d2b4a); display: grid; place-items: center; font-size: 96px; }
+  .card .body { padding: 20px 22px; }
+  .card h3 { margin: 0 0 12px; font-size: 30px; }
+  .bar { height: 14px; border-radius: 7px; background: var(--border); margin-top: 10px; }
+  .bar.s { width: 60%; }
+  .c1 { left: 10px; top: 40px; transform: rotate(-12deg); opacity: .8; }
+  .c2 { left: 150px; top: 20px; transform: rotate(7deg); }
+  .stamp { position: absolute; top: 26px; font-size: 46px; font-weight: 700; letter-spacing: 3px; padding: 2px 16px;
+           border: 6px solid; border-radius: 12px; background: rgba(0,0,0,.35); }
+  .like { left: 22px; color: var(--like); transform: rotate(-14deg); }
+  .nope { right: 22px; color: var(--nope); transform: rotate(14deg); }
+  .match { white-space: nowrap; position: absolute; left: -20px; bottom: 6px; font-size: 54px; font-weight: 700; font-style: italic;
+           background: linear-gradient(90deg, var(--gold), var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent;
+           transform: rotate(-4deg); filter: drop-shadow(0 6px 20px rgba(0,0,0,.6)); }
+  .heart { font-style: normal; color: initial; -webkit-text-fill-color: initial; }
+</style>
+</head>
+<body>
+  <div>
+    <h1 class="logo">Game<span class="grad">Match</span> 🎮</h1>
+    <p class="tag">¿A qué jugamos hoy?<br>Decidilo con tus amigos.</p>
+    <p class="sub">Cada uno vota desde su celu, swipe a la derecha o a la izquierda. Cuando a todos les gusta el mismo juego: <span class="grad">match</span>.</p>
+  </div>
+  <div class="stack">
+    <div class="card c1"><div class="media">🧟</div><div class="body"><h3>&nbsp;</h3><div class="bar"></div><div class="bar s"></div></div><div class="stamp nope">NOPE</div></div>
+    <div class="card c2"><div class="media">🏴‍☠️</div><div class="body"><h3>Esta noche</h3><div class="bar"></div><div class="bar s"></div></div><div class="stamp like">LIKE</div></div>
+    <div class="match">IT'S A MATCH <span class="heart">💘</span></div>
+  </div>
+</body>
+</html>
