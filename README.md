@@ -1,4 +1,4 @@
-# GameMatch 🎮💘
+# ¿Qué Jugamos? 🎮💘
 
 Elegí a qué jugar con tus amigos deslizando: el host crea una sala, cada uno entra desde el celular con un QR y vota 👍/👎 juegos cooperativos con trailer, precio y plataformas. Cuando a todos les gusta uno → **IT'S A MATCH**.
 

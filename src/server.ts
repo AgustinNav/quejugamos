@@ -1,4 +1,4 @@
-// GameMatch server: static files, rooms API with SSE, Steam proxy. Zero runtime dependencies.
+// ¿Qué Jugamos? server: static files, rooms API with SSE, Steam proxy. Zero runtime dependencies.
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';

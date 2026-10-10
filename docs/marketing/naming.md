@@ -61,3 +61,11 @@ Método de chequeo (2026-10-09): `Resolve-DnsName` sobre `.com`, `.app`, `.com.a
 | Reservar `@swipeamos` en TikTok, Instagram y Discord (o el backup) | Mismo día que se decide |
 | Comprar el dominio elegido (`.app` exige HTTPS, Cloud Run ya lo da) | Antes de F4 |
 | Sacar "Tinder de juegos" del `README.md` (hoy la primera línea lo dice) — **fuera de mi scope, lo marco** | Antes de hacer público el repo |
+
+## Decisión final (2026-10-09)
+
+**Nombre elegido por Agus: "¿Qué Jugamos?"** (slug `quejugamos`).
+
+- A favor: es literalmente la pregunta que se hace el grupo; cero explicación necesaria.
+- Riesgo aceptado: frase genérica → **no registrable como marca** y con mucho ruido en búsquedas. La protección real son el dominio y los handles.
+- Acciones pendientes (Agus, antes del primer post): reservar dominio (`quejugamos.app` / `.com.ar`) y handles `@quejugamos` (o variante) en TikTok e Instagram. En los guiones, `[nombre]` = "¿Qué Jugamos?".

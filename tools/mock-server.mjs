@@ -382,4 +382,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`[mock] GameMatch mock API on http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`[mock] QueJugamos mock API on http://${HOST}:${PORT}`));
