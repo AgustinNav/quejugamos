@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# GameMatch runtime image. Zero runtime deps: Node 24 runs src/server.ts via native type stripping,
+# Que Jugamos runtime image. Zero runtime deps: Node 24 runs src/server.ts via native type stripping,
 # so there is no build stage and no node_modules.
 #
 # Pinned to an exact patch + Alpine release so rebuilds are reproducible. Bump deliberately.

@@ -1,13 +1,13 @@
-# GameMatch — Deploy desde cero
+# ¿Qué Jugamos? — Deploy desde cero
 
 **Fecha:** 2026-10-09 · **Versión:** 1.0 · **Audiencia:** Agus (owner)
-**Objetivo:** llevar GameMatch a Cloud Run a USD 0/mes, con guardrails de costo, en ~30 minutos.
+**Objetivo:** llevar ¿Qué Jugamos? a Cloud Run a USD 0/mes, con guardrails de costo, en ~30 minutos.
 
 ## TL;DR
 
 ```bash
 gcloud auth login
-export PROJECT_ID=gamematch-<sufijo> REGION=us-central1
+export PROJECT_ID=quejugamos-<sufijo> REGION=us-central1
 gcloud projects create "$PROJECT_ID"
 gcloud billing projects link "$PROJECT_ID" --billing-account=<ID>
 ./scripts/setup-budget.sh       # alerta de USD 1 ANTES del primer deploy
@@ -26,7 +26,7 @@ Por qué Cloud Run y no otro proveedor: `docs/HOSTING-COSTS.md`.
 | `--concurrency` | 1000 | Cada stream SSE ocupa un slot. No cambia el costo |
 | `--timeout` | 3600 | El máximo. `EventSource` reconecta solo al cortarse |
 | `--set-env-vars` | `TRUST_PROXY=1,STEAM_CC=ar` | IP real desde `X-Forwarded-For` detrás del front end de Google |
-| `--service-account` | `gamematch-runtime@…` sin roles | La app no usa APIs de GCP. La SA default suele tener rol Editor |
+| `--service-account` | `quejugamos-runtime@…` sin roles | La app no usa APIs de GCP. La SA default suele tener rol Editor |
 | Cleanup policy en Artifact Registry | Conserva las últimas 3 imágenes | El free tier es de 0,5 GB |
 
 ---
@@ -36,7 +36,7 @@ Por qué Cloud Run y no otro proveedor: `docs/HOSTING-COSTS.md`.
 Elegí una opción:
 
 - **A. Cloud Shell (sin instalar nada).** Abrí <https://shell.cloud.google.com>, que ya trae `gcloud`, `docker` y `git`, y corré:
-  `git clone <tu repo> && cd gamematch`. Los scripts andan tal cual.
+  `git clone <tu repo> && cd quejugamos`. Los scripts andan tal cual.
 - **B. Local.** En PowerShell, corré `winget install -e --id Google.CloudSDK`, o bajá el instalador de <https://cloud.google.com/sdk/docs/install>. Después abrí **Git Bash** (los scripts son bash) y verificá con `gcloud version`.
 
 ```bash
@@ -47,8 +47,8 @@ gcloud config set project "$PROJECT_ID"   # opcional; los scripts también leen 
 ## 2. Crear el proyecto y vincular billing
 
 ```bash
-export PROJECT_ID=gamematch-$RANDOM   # el ID es global y no se puede cambiar
-gcloud projects create "$PROJECT_ID" --name="GameMatch"
+export PROJECT_ID=quejugamos-$RANDOM   # el ID es global y no se puede cambiar
+gcloud projects create "$PROJECT_ID" --name="Que Jugamos"
 gcloud billing accounts list          # copiá el ACCOUNT_ID (XXXXXX-XXXXXX-XXXXXX)
 gcloud billing projects link "$PROJECT_ID" --billing-account=<ACCOUNT_ID>
 ```
@@ -82,7 +82,7 @@ El script:
 3. Crea la SA de runtime sin permisos.
 4. Corre `gcloud run deploy --source .`: Cloud Build construye el `Dockerfile` y Cloud Run publica una revisión nueva con el 100 % del tráfico.
 5. Aplica la cleanup policy.
-6. Hace `curl /healthz` contra la URL `https://gamematch-xxxx.us-central1.run.app`.
+6. Hace `curl /healthz` contra la URL `https://quejugamos-xxxx.us-central1.run.app`.
 
 Es idempotente: re-ejecutarlo equivale a "deployar la versión actual".
 
@@ -99,7 +99,7 @@ Variables opcionales: `REGION`, `SERVICE`, `STEAM_CC`, `MEMORY`, `CONCURRENCY`, 
 
 ```bash
 gcloud domains verify midominio.com
-gcloud beta run domain-mappings create --service gamematch --domain play.midominio.com --region us-central1
+gcloud beta run domain-mappings create --service quejugamos --domain play.midominio.com --region us-central1
 # Crear en tu DNS los registros que imprime el comando. El certificado TLS se emite solo (puede tardar ~15–60 min).
 ```
 
@@ -109,23 +109,23 @@ La app escribe JSON a stdout con el campo `severity`. Cloud Logging lo parsea au
 
 ```bash
 # Últimos errores/warnings del día
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="gamematch" AND severity>=WARNING' \
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="quejugamos" AND severity>=WARNING' \
   --project "$PROJECT_ID" --freshness=1d --limit=50
 
 # Eventos de una sala
-gcloud logging read 'resource.labels.service_name="gamematch" AND jsonPayload.roomCode="ABC234"' --project "$PROJECT_ID" --limit=100
+gcloud logging read 'resource.labels.service_name="quejugamos" AND jsonPayload.roomCode="ABC234"' --project "$PROJECT_ID" --limit=100
 ```
 
-En la consola: Cloud Run → `gamematch` → **Logs** / **Metrics**. Para controlar costos, la métrica clave es **Billable container instance time**.
+En la consola: Cloud Run → `quejugamos` → **Logs** / **Metrics**. Para controlar costos, la métrica clave es **Billable container instance time**.
 
 ## 7. Rollback
 
 ```bash
-gcloud run revisions list --service gamematch --region us-central1 --project "$PROJECT_ID"
-gcloud run services update-traffic gamematch --region us-central1 --project "$PROJECT_ID" \
-  --to-revisions=gamematch-00007-abc=100
+gcloud run revisions list --service quejugamos --region us-central1 --project "$PROJECT_ID"
+gcloud run services update-traffic quejugamos --region us-central1 --project "$PROJECT_ID" \
+  --to-revisions=quejugamos-00007-abc=100
 # Volver a "siempre la última revisión" cuando el fix esté deployado:
-gcloud run services update-traffic gamematch --region us-central1 --project "$PROJECT_ID" --to-latest
+gcloud run services update-traffic quejugamos --region us-central1 --project "$PROJECT_ID" --to-latest
 ```
 
 > Mientras el tráfico esté fijado a una revisión, los deploys nuevos **no reciben tráfico** hasta que corras `--to-latest`. Todo rollback reinicia la instancia, así que **las salas en memoria se pierden**: hacelo fuera de una noche de votación.
@@ -135,20 +135,20 @@ gcloud run services update-traffic gamematch --region us-central1 --project "$PR
 - `.github/workflows/ci.yml` corre en cada PR y en cada push a `main`: tests, build de la imagen, container `healthy`, `curl /healthz` y verificación de que frena limpio con SIGTERM.
 - `.github/workflows/deploy.yml` es **manual** (`workflow_dispatch`): tests → build + smoke → push a Artifact Registry → `scripts/deploy-cloudrun.sh` con `IMAGE=…`. Autentica con **Workload Identity Federation**, así que no hay JSON keys en GitHub.
 
-Setup único (corré esto en Git Bash o Cloud Shell; `REPO` = `usuario/gamematch`):
+Setup único (corré esto en Git Bash o Cloud Shell; `REPO` = `usuario/quejugamos`):
 
 ```bash
-export PROJECT_ID=... REGION=us-central1 REPO=usuario/gamematch
+export PROJECT_ID=... REGION=us-central1 REPO=usuario/quejugamos
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 DEPLOYER=gh-deployer@$PROJECT_ID.iam.gserviceaccount.com
-RUNTIME=gamematch-runtime@$PROJECT_ID.iam.gserviceaccount.com   # lo crea deploy-cloudrun.sh
+RUNTIME=quejugamos-runtime@$PROJECT_ID.iam.gserviceaccount.com   # lo crea deploy-cloudrun.sh
 
 gcloud services enable iamcredentials.googleapis.com sts.googleapis.com --project "$PROJECT_ID"
-gcloud artifacts repositories create gamematch --repository-format=docker --location="$REGION" --project "$PROJECT_ID"
+gcloud artifacts repositories create quejugamos --repository-format=docker --location="$REGION" --project "$PROJECT_ID"
 
 # Pool + provider OIDC. Solo acepta tokens de TU repo y de la rama main.
 gcloud iam workload-identity-pools create github --location=global --project "$PROJECT_ID"
-gcloud iam workload-identity-pools providers create-oidc gamematch-repo \
+gcloud iam workload-identity-pools providers create-oidc quejugamos-repo \
   --location=global --workload-identity-pool=github --project "$PROJECT_ID" \
   --issuer-uri="https://token.actions.githubusercontent.com" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
@@ -157,7 +157,7 @@ gcloud iam workload-identity-pools providers create-oidc gamematch-repo \
 # Identidad de deploy con permisos mínimos
 gcloud iam service-accounts create gh-deployer --project "$PROJECT_ID"
 gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$DEPLOYER" --role=roles/run.admin
-gcloud artifacts repositories add-iam-policy-binding gamematch --location="$REGION" --project "$PROJECT_ID" \
+gcloud artifacts repositories add-iam-policy-binding quejugamos --location="$REGION" --project "$PROJECT_ID" \
   --member="serviceAccount:$DEPLOYER" --role=roles/artifactregistry.writer
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME" --project "$PROJECT_ID" \
   --member="serviceAccount:$DEPLOYER" --role=roles/iam.serviceAccountUser
@@ -172,7 +172,7 @@ En GitHub → Settings → Secrets and variables → Actions → **Variables** (
 |---|---|
 | `GCP_PROJECT_ID` | `$PROJECT_ID` |
 | `GCP_REGION` | `us-central1` |
-| `GCP_WIF_PROVIDER` | `projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/gamematch-repo` |
+| `GCP_WIF_PROVIDER` | `projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/quejugamos-repo` |
 | `GCP_DEPLOY_SA` | `$DEPLOYER` |
 
 Opcional: en Settings → Environments → `production`, agregá "Required reviewers" para que cada deploy pida tu aprobación.
@@ -180,7 +180,7 @@ Opcional: en Settings → Environments → `production`, agregá "Required revie
 ## 9. Checklist de guardrails de costo
 
 - [ ] Budget creado (`setup-budget.sh`) y el mail de alerta llega a una casilla que leés.
-- [ ] `max-instances = 1` y `min-instances = 0`: verificar con `gcloud run services describe gamematch --region us-central1 --format='yaml(spec.template.metadata.annotations)'`.
+- [ ] `max-instances = 1` y `min-instances = 0`: verificar con `gcloud run services describe quejugamos --region us-central1 --format='yaml(spec.template.metadata.annotations)'`.
 - [ ] Billing **request-based** (`run.googleapis.com/cpu-throttling: 'true'`).
 - [ ] Región Tier 1 (`us-central1`).
 - [ ] Sin Load Balancer, sin Cloud SQL, sin min-instances > 0, sin VPC connector.

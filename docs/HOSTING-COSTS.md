@@ -1,4 +1,4 @@
-# GameMatch — Dónde hostear y cuánto cuesta
+# ¿Qué Jugamos? — Dónde hostear y cuánto cuesta
 
 **Fecha de relevamiento:** 2026-10-09 · **Autor:** Claude (agente infra) para Agus · **Versión:** 1.0
 **Audiencia:** Agus (decisión de hosting) · **Objetivo:** elegir el hosting más barato con el menor riesgo de factura sorpresa para una app de 1 instancia con SSE.

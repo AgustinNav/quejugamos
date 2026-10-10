@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Deploy GameMatch to Google Cloud Run. Single source of truth for the service flags: used by humans
+# Deploy Que Jugamos to Google Cloud Run. Single source of truth for the service flags: used by humans
 # and by .github/workflows/deploy.yml.
 # Idempotent: safe to re-run; every run creates a new revision and shifts 100% traffic to it.
 #
 # Usage (from the repo root):
 #   PROJECT_ID=my-project ./scripts/deploy-cloudrun.sh                 # build with Cloud Build (--source)
-#   PROJECT_ID=my-project IMAGE=us-central1-docker.pkg.dev/my-project/gamematch/app:abc123 \
+#   PROJECT_ID=my-project IMAGE=us-central1-docker.pkg.dev/my-project/quejugamos/app:abc123 \
 #     BOOTSTRAP=0 ./scripts/deploy-cloudrun.sh                         # deploy a prebuilt image (CI)
 #
 # Env:
@@ -18,7 +18,7 @@ set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
 REGION="${REGION:-us-central1}"
-SERVICE="${SERVICE:-gamematch}"
+SERVICE="${SERVICE:-quejugamos}"
 IMAGE="${IMAGE:-}"
 BOOTSTRAP="${BOOTSTRAP:-1}"
 STEAM_CC="${STEAM_CC:-ar}"
@@ -28,11 +28,11 @@ MEMORY="${MEMORY:-512Mi}"
 CONCURRENCY="${CONCURRENCY:-1000}"
 # Cloud Run maximum (60 min). SSE clients (EventSource) reconnect automatically when it is reached.
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-3600}"
-# `--source` deploys push to this auto-created repo; prebuilt images go to the `gamematch` repo.
-AR_REPOS="${AR_REPOS:-cloud-run-source-deploy gamematch}"
+# `--source` deploys push to this auto-created repo; prebuilt images go to the `quejugamos` repo.
+AR_REPOS="${AR_REPOS:-cloud-run-source-deploy quejugamos}"
 # Dedicated runtime identity with ZERO roles: the app calls no GCP APIs. The default compute service
 # account often has Editor on the whole project, which a compromised container would inherit.
-RUNTIME_SA_NAME="${RUNTIME_SA_NAME:-gamematch-runtime}"
+RUNTIME_SA_NAME="${RUNTIME_SA_NAME:-quejugamos-runtime}"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 KEEP_IMAGES="${KEEP_IMAGES:-3}"
 
@@ -69,7 +69,7 @@ ensure_runtime_service_account() {
   fi
   log "Creating runtime service account ${RUNTIME_SA} (no roles granted)"
   gcloud iam service-accounts create "${RUNTIME_SA_NAME}" \
-    --project="${PROJECT_ID}" --display-name="GameMatch Cloud Run runtime (no permissions)"
+    --project="${PROJECT_ID}" --display-name="Que Jugamos Cloud Run runtime (no permissions)"
 }
 
 deploy_service() {
@@ -96,7 +96,7 @@ deploy_service() {
     --timeout="${REQUEST_TIMEOUT}" \
     --set-env-vars="TRUST_PROXY=1,STEAM_CC=${STEAM_CC}" \
     --service-account="${RUNTIME_SA}" \
-    --labels="app=gamematch" \
+    --labels="app=quejugamos" \
     --quiet
 }
 

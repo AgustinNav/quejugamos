@@ -38,4 +38,4 @@ jobs:
 
       # Builds the image, waits for HEALTHCHECK=healthy, curls /healthz, and checks a clean SIGTERM stop.
       - name: Build and smoke test image
-        run: ./scripts/docker-smoke.sh "gamematch:${{ github.sha }}"
+        run: ./scripts/docker-smoke.sh "quejugamos:${{ github.sha }}"

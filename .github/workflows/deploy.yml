@@ -4,9 +4,9 @@
 #
 # Required repository variables (Settings > Secrets and variables > Actions > Variables; not secrets,
 # none of them grant access on their own):
-#   GCP_PROJECT_ID     e.g. gamematch-prod
+#   GCP_PROJECT_ID     e.g. quejugamos-prod
 #   GCP_REGION         e.g. us-central1
-#   GCP_WIF_PROVIDER   projects/<NUMBER>/locations/global/workloadIdentityPools/github/providers/gamematch-repo
+#   GCP_WIF_PROVIDER   projects/<NUMBER>/locations/global/workloadIdentityPools/github/providers/quejugamos-repo
 #   GCP_DEPLOY_SA      gh-deployer@<PROJECT_ID>.iam.gserviceaccount.com
 name: Deploy to Cloud Run
 
@@ -29,7 +29,7 @@ jobs:
     env:
       PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.GCP_REGION }}
-      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/gamematch/app:${{ github.sha }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/quejugamos/app:${{ github.sha }}
     steps:
       - uses: actions/checkout@v7
 

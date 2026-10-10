@@ -5,8 +5,8 @@
 # Usage: ./scripts/docker-smoke.sh [image-tag]
 set -euo pipefail
 
-IMAGE="${1:-gamematch:smoke}"
-CONTAINER="gamematch-smoke-$$"
+IMAGE="${1:-quejugamos:smoke}"
+CONTAINER="quejugamos-smoke-$$"
 HOST_PORT="${HOST_PORT:-18080}"
 HEALTH_TIMEOUT_S="${HEALTH_TIMEOUT_S:-60}"
 # Docker's default stop grace period is 10 s (same as Cloud Run). A clean SIGTERM exit is well under it.

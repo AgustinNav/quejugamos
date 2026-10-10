@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a monthly budget alert scoped to the GameMatch project. Idempotent (skips if it exists).
+# Create a monthly budget alert scoped to the Que Jugamos project. Idempotent (skips if it exists).
 #
 # IMPORTANT: a GCP budget only SENDS EMAILS. It does NOT stop or cap spending. The hard stop is the
 # optional "kill switch" (budget -> Pub/Sub -> function that disables billing), documented in
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}"
-BUDGET_NAME="${BUDGET_NAME:-gamematch-monthly}"
+BUDGET_NAME="${BUDGET_NAME:-quejugamos-monthly}"
 BUDGET_AMOUNT_DEFAULT_USD="1"
 
 log() { printf '\n==> %s\n' "$*" >&2; }
