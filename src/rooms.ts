@@ -14,7 +14,9 @@ export type Snapshot = {
   filters: Filters | null;
   deck: string[];
   index: number;
+  // Closed cards only: open-card votes stay private until the card closes (see currentVoters).
   votes: Record<string, Record<string, Vote>>;
+  currentVoters: string[];
   lastResult: CardResult | null;
   // Frozen at close time, so players joining later can't turn a past match into a non-match.
   results: Record<string, CardResult>;
@@ -23,7 +25,9 @@ export type Snapshot = {
 
 type Player = PublicPlayer & { token: string };
 
-type Room = Omit<Snapshot, 'players' | 'results'> & {
+export type CurrentVote = { playerId: string; gameId: string | null; vote: Vote | null };
+
+type Room = Omit<Snapshot, 'players' | 'results' | 'currentVoters'> & {
   players: Player[];
   hostToken: string;
   history: CardResult[];
@@ -215,6 +219,14 @@ export class RoomStore {
     return toSnapshot(this.getRoom(code));
   }
 
+  /** The caller's own vote on the open card: the only way to read it before the card closes. */
+  currentVote(code: string, token: string | null): CurrentVote {
+    const room = this.getRoom(code);
+    const player = this.requirePlayer(room, token);
+    const gameId = currentCardId(room);
+    return { playerId: player.id, gameId, vote: gameId ? room.votes[gameId]?.[player.id] ?? null : null };
+  }
+
   /** Removes rooms idle longer than the TTL. Returns the expired codes. */
   expire(): string[] {
     const expired: string[] = [];
@@ -329,7 +341,13 @@ function closeCurrentCard(room: Room): void {
   if (room.index >= room.deck.length) room.phase = 'finished';
 }
 
+function currentCardId(room: Room): string | null {
+  return room.phase === 'voting' ? room.deck[room.index] ?? null : null;
+}
+
 function toSnapshot(room: Room): Snapshot {
+  const openId = currentCardId(room);
+  const openVotes = openId ? room.votes[openId] ?? {} : {};
   return structuredClone({
     code: room.code,
     phase: room.phase,
@@ -337,7 +355,8 @@ function toSnapshot(room: Room): Snapshot {
     filters: room.filters,
     deck: room.deck,
     index: room.index,
-    votes: room.votes,
+    votes: Object.fromEntries(Object.entries(room.votes).filter(([gameId]) => gameId !== openId)),
+    currentVoters: room.players.filter((p) => openVotes[p.id] !== undefined).map((p) => p.id),
     lastResult: room.lastResult,
     results: Object.fromEntries(room.history.map((r) => [r.gameId, r])),
     version: room.version,

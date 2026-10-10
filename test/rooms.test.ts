@@ -205,12 +205,35 @@ describe('vote', () => {
   test('records, changes and clears a vote', () => {
     const r = votingRoom();
     let snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    assert.deepEqual(snap.votes, { a: { [r.ana.playerId]: 'like' } });
+    assert.deepEqual(snap.currentVoters, [r.ana.playerId]);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'like');
     snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
-    assert.deepEqual(snap.votes, { a: { [r.ana.playerId]: 'nope' } });
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'nope');
     snap = r.store.vote(r.code, r.ana.playerToken, 'a', null);
-    assert.deepEqual(snap.votes, {});
+    assert.deepEqual(snap.currentVoters, []);
+    assert.deepEqual(r.store.currentVote(r.code, r.ana.playerToken), { playerId: r.ana.playerId, gameId: 'a', vote: null });
     assert.equal(snap.index, 0);
+  });
+
+  test('snapshots hide who voted what on the open card until it closes', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
+    const open = r.store.snapshot(r.code);
+    assert.deepEqual(open.votes, {});
+    assert.deepEqual(open.currentVoters, [r.ana.playerId]);
+    assert.ok(!JSON.stringify(open).includes('nope'), 'open-card vote leaked');
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    const closed = r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
+    assert.deepEqual(closed.votes.a, { [r.ana.playerId]: 'nope', [r.host.playerId]: 'like', [r.bob.playerId]: 'like' });
+    assert.deepEqual(closed.currentVoters, []);
+  });
+
+  test('currentVote rejects foreign tokens and is null outside voting', () => {
+    const r = votingRoom();
+    expectError(() => r.store.currentVote(r.code, 'nope'), 401, 'unauthorized');
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    assert.deepEqual(store.currentVote(host.code, host.playerToken), { playerId: host.playerId, gameId: null, vote: null });
   });
 
   test('version increments on change and stays on a no-op vote', () => {
@@ -340,7 +363,7 @@ describe('kick', () => {
     const before = r.store.snapshot(r.code);
     const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
     assert.deepEqual(snap.players.map((p) => p.id), [r.host.playerId, r.ana.playerId]);
-    assert.equal(snap.votes.a, undefined);
+    assert.deepEqual(snap.currentVoters, []);
     assert.equal(snap.index, 0);
     assert.equal(snap.version, before.version + 1);
   });

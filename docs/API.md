@@ -18,17 +18,19 @@ Source of truth shared by backend and frontend. Change it only with both sides u
   "phase": "voting",
   "players": [{ "id": "p_1a2b3c", "name": "Agus", "isHost": true }],
   "filters": { "platforms": ["PC"], "maxPrice": 20, "fitsGroup": true },
-  "deck": ["lethal-company", "valheim"],
-  "index": 0,
-  "votes": { "lethal-company": { "p_1a2b3c": "like" } },
-  "lastResult": { "gameId": "valheim", "likes": 3, "nopes": 0, "match": true },
-  "results": { "valheim": { "gameId": "valheim", "likes": 3, "nopes": 0, "match": true } },
+  "deck": ["valheim", "lethal-company"],
+  "index": 1,
+  "votes": { "valheim": { "p_1a2b3c": "like" } },
+  "currentVoters": ["p_1a2b3c"],
+  "lastResult": { "gameId": "valheim", "likes": 1, "nopes": 0, "match": true },
+  "results": { "valheim": { "gameId": "valheim", "likes": 1, "nopes": 0, "match": true } },
   "version": 17
 }
 ```
 
 - `filters.maxPrice`: USD number or `null` (no limit). `filters` is `null` while in `lobby`.
-- `votes`: every voted card, `playerId -> "like" | "nope"`.
+- `votes`: every **closed** card, `playerId -> "like" | "nope"`. The open card (`deck[index]` while `voting`) is never in `votes`: nobody, not even the host, sees who voted what until it closes.
+- `currentVoters`: ids of the players who already voted on the open card (who, never what). Empty outside `voting`.
 - `lastResult`: the card that was just closed (`null` until the first one). Clients use it for the swipe animation and the "IT'S A MATCH" overlay (`match` = every player liked it).
 - `results`: every closed card, frozen when it closed (`undo` removes the reopened card). Use it for the ranking instead of recomputing from `votes`: players who join later must not change past results.
 - After `undo`, `lastResult` is `null`.
@@ -44,7 +46,8 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB). All er
 | GET | `/api/rooms/:code` | — | — | `200 Snapshot` | 404 `room_not_found` |
 | POST | `/api/rooms/:code/join` | — | `{ "name": string }` | `201 { playerToken, playerId }` | 400 `invalid_name`, 404, 409 `name_taken`, 409 `room_full`, 409 `room_finished` |
 | POST | `/api/rooms/:code/start` | host | `{ "filters": { platforms: string[], maxPrice: number \| null, fitsGroup: boolean } }` | `200 Snapshot` | 400 `invalid_filters`, 401, 403 `not_host`, 409 `already_started`, 422 `empty_deck` |
-| POST | `/api/rooms/:code/vote` | player | `{ "gameId": string, "vote": "like" \| "nope" \| null }` | `200 Snapshot` | 400 `invalid_vote`, 401, 409 `not_current_game`, 409 `not_voting` |
+| POST | `/api/rooms/:code/vote` | player | `{ "gameId": string, "vote": "like" \| "nope" \| null }` | `200 Snapshot & { myVote }` — `myVote`: the caller's vote on the open card of the returned snapshot (`null` if none, e.g. the vote closed the card) | 400 `invalid_vote`, 401, 409 `not_current_game`, 409 `not_voting` |
+| GET | `/api/rooms/:code/me` | player | — | `200 { playerId, gameId, vote }` — the caller's vote on the open card (`gameId`/`vote` `null` when there is none). Used to restore your own vote after a reload | 401, 404 |
 | POST | `/api/rooms/:code/next` | host | `{}` | `200 Snapshot` (closes the current card even if votes are missing) | 401, 403, 409 `not_voting` |
 | POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes) | 401, 403, 409 `nothing_to_undo` |
 | POST | `/api/rooms/:code/kick` | host | `{ "playerId": string }` | `200 Snapshot` (removes the player; see Rules) | 400 `invalid_player`, 401, 403 `not_host`, 404 `player_not_found`, 409 `cannot_kick_host` |

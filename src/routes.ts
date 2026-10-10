@@ -74,9 +74,15 @@ export const startRoom: Handler = async (deps, { req, res, code }) => {
 export const voteRoom: Handler = async (deps, { req, res, code }) => {
   const body = await readJsonBody(req);
   const before = deps.store.snapshot(code);
-  const after = deps.store.vote(code, bearerToken(req), field(body, 'gameId'), field(body, 'vote'));
+  const token = bearerToken(req);
+  const after = deps.store.vote(code, token, field(body, 'gameId'), field(body, 'vote'));
   publish(deps, before, after);
-  sendJson(res, 200, after);
+  // Snapshots hide open-card votes, so the voter gets their own back here (null once the card closed).
+  sendJson(res, 200, { ...after, myVote: deps.store.currentVote(code, token).vote });
+};
+
+export const myVote: Handler = (deps, { req, res, code }) => {
+  sendJson(res, 200, deps.store.currentVote(code, bearerToken(req)));
 };
 
 export const nextCard: Handler = async (deps, { req, res, code }) => {
