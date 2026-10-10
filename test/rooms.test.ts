@@ -44,6 +44,49 @@ function votingRoom() {
   return { ...ctx, host, ana, bob, code: host.code };
 }
 
+describe('name validation (invisible / impersonating names)', () => {
+  const INVALID: Record<string, string> = {
+    'zero-width space only': '​',
+    'zero-width chars around a name': 'A​na',
+    'Hangul filler U+3164': 'ㅤ',
+    'Hangul choseong filler U+115F': 'Anaᅟ',
+    'Hangul jungseong filler U+1160': 'ᅠAna',
+    'halfwidth Hangul filler U+FFA0': 'ﾠ',
+    'right-to-left mark': 'Ana‏',
+    'embedded newline': 'An\na',
+    'line separator U+2028': 'An a',
+    'paragraph separator U+2029': 'An a',
+    '15 combining marks': 'a' + '́'.repeat(15),
+    '3 stacked combining marks': 'á̂̃',
+    'only punctuation': '...',
+    'only combining marks': '́̂',
+    'soft hyphen': 'An­a',
+    'ZWJ outside an emoji sequence': 'A‍na',
+  };
+  for (const [label, bad] of Object.entries(INVALID)) {
+    test(`rejects ${label}`, () => expectError(() => makeStore().store.create(bad, '1.1.1.1'), 400, 'invalid_name'));
+  }
+
+  for (const good of ['Agus', 'Ñoño', 'José', 'Juli 🎮', '42', 'éé', '👨‍👩‍👧', '1️⃣ Uno', 'Zoë']) {
+    test(`accepts ${JSON.stringify(good)}`, () => {
+      const { store } = makeStore();
+      const { code } = store.create(good, '1.1.1.1');
+      assert.equal(store.snapshot(code).players[0].name, good.normalize('NFC'));
+    });
+  }
+
+  test('uniqueness folds case, compatibility forms and invisible code points', () => {
+    const { store } = makeStore();
+    const { code } = store.create('Agus', '1.1.1.1');
+    expectError(() => store.join(code, 'ＡＧＵＳ'), 409, 'name_taken'); // fullwidth
+    expectError(() => store.join(code, 'agus️'), 409, 'name_taken'); // variation selector
+    store.join(code, 'José');
+    expectError(() => store.join(code, 'José'), 409, 'name_taken'); // decomposed accent
+    store.join(code, 'Ana 🎮');
+    expectError(() => store.join(code, 'ana 🎮️'), 409, 'name_taken');
+  });
+});
+
 describe('create', () => {
   test('returns code, tokens and host as first player', () => {
     const { store } = makeStore();
