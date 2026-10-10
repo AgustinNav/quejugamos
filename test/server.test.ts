@@ -229,6 +229,18 @@ describe('static files', () => {
     assert.equal(await room.text(), html);
   });
 
+  test('hls.js is vendored and the CSP allows no third-party script origin', async () => {
+    const index = await fetch(`${base}/`);
+    const csp = index.headers.get('content-security-policy') ?? '';
+    assert.match(csp, /script-src 'self'(;|$)/);
+    assert.ok(!csp.includes('jsdelivr'), csp);
+    assert.match(await index.text(), /<script src="\/vendor\/hls\.min\.js"/);
+    const hls = await fetch(`${base}/vendor/hls.min.js`);
+    assert.equal(hls.status, 200);
+    assert.match(hls.headers.get('content-type') ?? '', /^text\/javascript/);
+    await hls.arrayBuffer();
+  });
+
   test('blocks traversal', async () => {
     const status = await rawRequest(srv.port, 'GET /..%2f..%2fpackage.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
     assert.ok(status === 403 || status === 404, String(status));

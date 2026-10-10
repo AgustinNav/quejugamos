@@ -32,13 +32,13 @@ const STEAM_CDN = 'https://*.steamstatic.com';
 const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' https://cdn.jsdelivr.net", // QR lib is vendored under /vendor
+    "script-src 'self'", // QR lib and hls.js are vendored under /vendor
     "style-src 'self' https://fonts.googleapis.com",
     'font-src https://fonts.gstatic.com',
     `img-src 'self' data: ${STEAM_CDN}`,
     `media-src 'self' blob: ${STEAM_CDN}`,
     `connect-src 'self' ${STEAM_CDN}`, // 'self' covers SSE; hls.js fetches trailer segments via XHR
-    "worker-src 'self' blob:",
+    "worker-src 'self' blob:", // hls.js injects its transmuxer worker from a Blob URL
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",
