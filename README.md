@@ -28,6 +28,8 @@ Para probar con celulares en la misma red: `HOST=0.0.0.0 npm start` y abrir `htt
 npm test
 ```
 
+`npm run typecheck` corre `tsc` (sin emitir nada): Node solo borra los tipos, no los chequea, así que esto lo corre CI antes de los tests. Requiere `npm ci` (dev deps únicamente; el runtime sigue sin dependencias).
+
 `node:test` sobre el dominio de salas, el filtrado del mazo y el server HTTP real (incluye inputs malformados en cada endpoint).
 
 ## Estructura

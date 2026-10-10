@@ -23,8 +23,16 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+          cache: npm
 
-      # Zero runtime deps: no npm ci needed. If a package-lock.json appears, add `npm ci` here.
+      # Dev-only deps (typescript, @types/node). Runtime stays zero-dependency.
+      - name: Install dev dependencies
+        run: npm ci
+
+      # Node's type stripping never type-checks; this is the only gate against e.g. undefined identifiers.
+      - name: Type-check
+        run: npm run typecheck
+
       - name: Run tests
         run: npm test
 

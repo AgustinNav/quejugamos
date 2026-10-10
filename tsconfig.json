@@ -1,0 +1,26 @@
+{
+  // Type-check only. Node 24 runs src/*.ts directly via type stripping (no build step), so this
+  // config mirrors that runtime: nothing is emitted, imports keep their `.ts` extension, and only
+  // erasable syntax is allowed (enums, namespaces and parameter properties would crash `node`).
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2024",
+    "lib": ["es2024"],
+    "strict": true,
+    "types": ["node"],
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // src/server.ts imports the plain-JS catalog ../public/games.js (shared with the browser).
+    // allowJs lets tsc infer its export types; checkJs: false means the JS itself is never
+    // type-checked. Only files reached via an import are pulled in, so public/js/** stays out.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
