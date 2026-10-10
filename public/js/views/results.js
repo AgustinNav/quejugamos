@@ -1,4 +1,5 @@
-// Final ranking: closed cards sorted by likes, matches (everyone liked it) highlighted.
+// Final ranking: closed cards sorted by likes, matches (everyone liked it) highlighted; games skipped
+// as already played go in their own group below.
 import { $, esc, showScreen } from '../dom.js';
 import { getGame, getDetails, loadMany, priceInfo, priceUsd, storeUrl } from '../catalog.js';
 
@@ -14,9 +15,22 @@ function tally(state, gameId) {
   return { likers, likes, nopes, match };
 }
 
+// Cards skipped with "Ya lo jugamos" are listed apart and never ranked (nobody voted them).
+const closedIds = (state) => state.deck.slice(0, state.index).filter((id) => state.results[id]);
+
+function playedGames(state) {
+  return closedIds(state).filter((id) => state.results[id].played).map((id) => getGame(id)).filter(Boolean);
+}
+
+function renderPlayed(state) {
+  const games = playedGames(state);
+  $('playedGroup').hidden = games.length === 0;
+  $('playedList').innerHTML = games.map((game) => `<li><span aria-hidden="true">✅</span> ${esc(game.name)}</li>`).join('');
+}
+
 function rankRows(state) {
-  return state.deck.slice(0, state.index)
-    .filter((id) => state.results[id])
+  return closedIds(state)
+    .filter((id) => !state.results[id].played)
     .map((id) => getGame(id))
     .filter(Boolean)
     .map((game) => ({ game, ...tally(state, game.id) }))
@@ -27,6 +41,7 @@ export function renderResults(state, note = '') {
   const rows = rankRows(state);
   $('resultsNote').textContent = note;
   paint(rows);
+  renderPlayed(state);
   showScreen('resultsScreen');
   // Thumbnails/prices for the top of the ranking; repaint once they arrive.
   const token = ++renderToken;

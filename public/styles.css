@@ -337,3 +337,26 @@ body.is-phone .vote-btn { min-height: 88px; font-size: 44px; }
   /* Fading is not motion: keep the match overlay readable. */
   .match-overlay.play { animation-duration: 1.8s !important; }
 }
+
+/* ===== "Ya lo jugamos" (already played) ===== */
+.stamp.played {
+  left: 50%; top: 40%; color: var(--gold); white-space: nowrap;
+  transform: translate(-50%, -50%) rotate(-8deg);
+}
+/* Stamp shows first, then the card shrinks and fades (not a LIKE/NOPE swipe). */
+.card.played-out { transition: transform .7s ease, opacity .35s ease .35s; }
+.card.played-out .stamp.played { opacity: 1; }
+.played-btn { align-self: flex-start; min-height: 48px; }
+body.is-phone .played-btn { align-self: stretch; }
+body.is-phone .stamp.played { font-size: 26px; }
+.played-hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.link-btn {
+  font: inherit; color: var(--accent); background: none; border: none; padding: 0 6px; cursor: pointer;
+  text-decoration: underline; min-height: 48px;
+}
+.played-group { margin-top: 24px; }
+.played-group h3 { margin: 0 0 8px; font-size: 17px; }
+.played-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.played-list li {
+  padding: 6px 12px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}

@@ -101,6 +101,7 @@
       </div>
       <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
       <p class="form-error" id="startError" role="alert"></p>
+      <p class="played-hint" id="playedHint" hidden><span id="playedHintText"></span> · <button class="link-btn" type="button" id="playedResetBtn">Mostrar de nuevo</button></p>
     </section>
   </main>
 
@@ -119,6 +120,7 @@
     <article class="card" id="card" aria-label="Juego actual">
       <div class="stamp like" aria-hidden="true">LIKE</div>
       <div class="stamp nope" aria-hidden="true">NOPE</div>
+      <div class="stamp played" aria-hidden="true">YA JUGADO ✅</div>
       <div class="media" id="media">
         <video id="video" playsinline muted loop></video>
         <img id="mediaImg" alt="">
@@ -139,6 +141,7 @@
       <p class="pitch" id="gamePitch"></p>
       <p class="steam-desc" id="gameSteamDesc"></p>
       <div class="links" id="gameLinks"></div>
+      <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
 
       <section class="voters host-only" aria-labelledby="votersTitle">
         <h3 id="votersTitle">¿Quién votó? <span class="count" id="votersCount"></span></h3>
@@ -169,6 +172,10 @@
       </div>
       <p class="muted" id="resultsNote"></p>
       <ol class="ranking" id="ranking"></ol>
+      <section class="played-group" id="playedGroup" aria-labelledby="playedGroupTitle" hidden>
+        <h3 id="playedGroupTitle">✅ Ya jugados <span class="count">(salteados, no cuentan para el ranking)</span></h3>
+        <ul class="played-list" id="playedList"></ul>
+      </section>
     </section>
   </main>
 

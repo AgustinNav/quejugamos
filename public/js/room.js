@@ -1,14 +1,15 @@
 // Room lifecycle: initial fetch, SSE connection, snapshot versioning and rendering by phase.
-import { $, setLoading } from './dom.js';
+import { $, setLoading, toast } from './dom.js';
 import { api, openEvents } from './api.js';
 import { loadSession, saveSession, clearSession } from './store.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
-import { flyOut, resetCard } from './swipe.js';
+import { flyOut, playedOut, resetCard } from './swipe.js';
+import { syncPlayed } from './played.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
-import { renderVoting, forgetRenderedGame, announceResult, currentGameId } from './views/voting.js';
+import { renderVoting, forgetRenderedGame, announceResult, currentGameId, gameName } from './views/voting.js';
 import { renderResults } from './views/results.js';
 
 const RECONNECT_DELAY_MS = 3000;
@@ -212,6 +213,7 @@ export function applySnapshot(room, snapshot) {
   }
   const prev = room.state;
   room.state = snapshot;
+  syncPlayed(room);
   if (!room.busy) render(room, prev);
   return true;
 }
@@ -228,8 +230,14 @@ function render(room, prev) {
 async function animateClose(room) {
   room.busy = true;
   const result = room.state.lastResult;
-  announceResult(result);
-  await flyOut(result.likes > result.nopes ? 'right' : 'left');
+  if (result.played) {
+    // Skipped as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
+    toast(`«${gameName(result.gameId)}» — ya lo jugaron, salteado`);
+    await playedOut();
+  } else {
+    announceResult(result);
+    await flyOut(result.likes > result.nopes ? 'right' : 'left');
+  }
   room.busy = false;
   if (room.disposed) return;
   resetCard();
