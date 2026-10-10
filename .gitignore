@@ -1,0 +1,4 @@
+node_modules/
+.steam-cache.json
+*.log
+.env
