@@ -5,11 +5,12 @@ import { getGame, getDetails, loadMany, priceInfo, priceUsd, storeUrl } from '..
 const THUMBS_TO_FETCH = 10;
 let renderToken = 0;
 
+// Counts come from the server's frozen per-card result; names from the live player list.
 function tally(state, gameId) {
   const votes = state.votes[gameId] || {};
   const likers = state.players.filter((p) => votes[p.id] === 'like').map((p) => p.name);
-  const nopes = state.players.filter((p) => votes[p.id] === 'nope').length;
-  return { likers, likes: likers.length, nopes };
+  const result = state.results?.[gameId] || { likes: likers.length, nopes: 0, match: false };
+  return { likers, likes: result.likes, nopes: result.nopes, match: result.match };
 }
 
 function rankRows(state) {
@@ -23,27 +24,27 @@ function rankRows(state) {
 export function renderResults(state, note = '') {
   const rows = rankRows(state);
   $('resultsNote').textContent = note;
-  paint(rows, state.players.length);
+  paint(rows);
   showScreen('resultsScreen');
   // Thumbnails/prices for the top of the ranking; repaint once they arrive.
   const token = ++renderToken;
   const missing = rows.slice(0, THUMBS_TO_FETCH).map((r) => r.game.id).filter((id) => !getDetails(id));
-  if (missing.length) loadMany(missing).then(() => { if (token === renderToken) paint(rankRows(state), state.players.length); });
+  if (missing.length) loadMany(missing).then(() => { if (token === renderToken) paint(rankRows(state)); });
 }
 
-function paint(rows, total) {
+function paint(rows) {
   if (!rows.length) {
     $('ranking').innerHTML = '<p class="empty">No se llegó a votar ningún juego.</p>';
     return;
   }
-  $('ranking').innerHTML = rows.map((row, i) => resultRow(row, i, total)).join('');
+  $('ranking').innerHTML = rows.map(resultRow).join('');
   // Widths through CSSOM: the CSP blocks inline style attributes.
   $('ranking').querySelectorAll('[data-pct]').forEach((bar) => { bar.style.width = `${bar.dataset.pct}%`; });
 }
 
-function resultRow({ game, likers, likes, nopes }, i, total) {
+function resultRow({ game, likers, likes, nopes, match: isMatch }, i) {
   const d = getDetails(game.id) || {};
-  const isMatch = total > 0 && likes === total;
+  const voters = likes + nopes;
   const thumb = d.header ? `<img src="${esc(d.header)}" alt="">` : `<div class="thumb-ph">${esc(game.name)}</div>`;
   const link = storeUrl(game);
   const price = priceInfo(game);
@@ -54,8 +55,8 @@ function resultRow({ game, likers, likes, nopes }, i, total) {
       ${thumb}
       <div>
         <p class="r-name">${esc(game.name)}</p>
-        <p class="r-sub">${likes}/${total} likes · ${nopes} nope${likersHtml}</p>
-        <div class="bar"><span data-pct="${total ? Math.round((likes / total) * 100) : 0}"></span></div>
+        <p class="r-sub">${likes}/${voters} likes · ${nopes} nope${likersHtml}</p>
+        <div class="bar"><span data-pct="${voters ? Math.round((likes / voters) * 100) : 0}"></span></div>
       </div>
       <div class="r-right">
         <span class="price ${price.free ? 'free' : ''}">${price.html}</span>

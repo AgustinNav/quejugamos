@@ -231,6 +231,21 @@ describe('vote', () => {
     assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 3, nopes: 0, match: true });
   });
 
+  test('results keep a past match frozen when a player joins later', () => {
+    const r = votingRoom();
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
+    r.store.join(r.code, 'Late');
+    const snap = r.store.snapshot(r.code);
+    assert.deepEqual(snap.results, { a: { gameId: 'a', likes: 3, nopes: 0, match: true } });
+  });
+
+  test('undo removes the reopened card from results', () => {
+    const r = votingRoom();
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
+    const snap = r.store.undo(r.code, r.host.hostToken);
+    assert.deepEqual(snap.results, {});
+  });
+
   test('auto-advances without match on a split vote', () => {
     const r = votingRoom();
     r.store.vote(r.code, r.host.playerToken, 'a', 'like');
