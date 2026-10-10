@@ -93,10 +93,10 @@ export const undoCard: Handler = async (deps, { req, res, code }) => {
   sendJson(res, 200, after);
 };
 
-export const roomEvents: Handler = (deps, { res, code }) => {
+export const roomEvents: Handler = (deps, { res, code, ip }) => {
   const snapshot = deps.store.snapshot(code);
-  if (!deps.hub.connect(snapshot.code, res, snapshot)) {
-    sendError(res, 503, 'capacity', 'Too many live connections for this room');
+  if (!deps.hub.connect(snapshot.code, res, snapshot, ip)) {
+    sendError(res, 503, 'capacity', 'Too many live connections, try again later');
   }
 };
 
