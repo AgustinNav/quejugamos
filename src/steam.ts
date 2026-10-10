@@ -29,32 +29,58 @@ const FAILURE_TTL_MS = 120_000;
 // After Steam answers 429, nobody calls it for this long: hammering a rate limit only extends it.
 const RATE_LIMIT_BACKOFF_MS = 60_000;
 
-function pickMovie(movies: any[] = []) {
-  const movie = movies.find((m) => m.highlight) || movies[0];
-  if (!movie) return null;
-  return {
-    name: movie.name,
-    poster: movie.thumbnail,
-    hls: movie.hls_h264 || null,
-    mp4: movie.mp4?.max || movie.mp4?.['480'] || null,
-  };
+export type Movie = { name: string; poster: string | null; hls: string | null; mp4: string | null };
+
+// Caps keep the payload small: the gallery is opened on phones over mobile data.
+const MAX_MOVIES = 6;
+const MAX_SCREENSHOTS = 12;
+
+function toMovie(raw: any): Movie | null {
+  const hls = raw?.hls_h264 || null;
+  const mp4 = raw?.mp4?.max || raw?.mp4?.['480'] || null;
+  if (!hls && !mp4) return null; // nothing playable
+  return { name: String(raw.name ?? ''), poster: raw.thumbnail || null, hls, mp4 };
+}
+
+/** Highlighted trailers first (Steam's own pick), then the rest, in Steam's order. */
+function pickMovies(raw: unknown): Movie[] {
+  if (!Array.isArray(raw)) return [];
+  const ordered = [...raw.filter((m) => m?.highlight), ...raw.filter((m) => !m?.highlight)];
+  return ordered.map(toMovie).filter((m): m is Movie => m !== null).slice(0, MAX_MOVIES);
+}
+
+function pickScreenshots(raw: unknown): { full: string; thumb: string }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s) => typeof s?.path_full === 'string')
+    .slice(0, MAX_SCREENSHOTS)
+    .map((s) => ({ full: s.path_full, thumb: typeof s.path_thumbnail === 'string' ? s.path_thumbnail : s.path_full }));
 }
 
 function toGameDetails(data: any): GameDetails {
+  const movies = pickMovies(data.movies);
+  const shots = pickScreenshots(data.screenshots);
   return {
     name: data.name,
     isFree: data.is_free,
     price: data.price_overview || null,
     shortDescription: data.short_description,
     header: data.header_image,
-    screenshots: (data.screenshots || []).slice(0, 4).map((s: any) => s.path_full),
-    movie: pickMovie(data.movies),
+    screenshots: shots.map((s) => s.full),
+    screenshotThumbs: shots.map((s) => s.thumb),
+    movie: movies[0] ?? null,
+    movies,
     genres: (data.genres || []).map((g: any) => g.description),
     categories: (data.categories || []).map((c: any) => c.description),
     reviews: data.recommendations?.total || null,
     metacritic: data.metacritic?.score || null,
     releaseDate: data.release_date?.date || null,
   };
+}
+
+/** Entries cached by older versions lack the gallery fields: they count as a miss (still usable as stale). */
+function hasCurrentShape(details: GameDetails | undefined): boolean {
+  return Array.isArray(details?.movies) && Array.isArray(details?.screenshotThumbs);
 }
 
 export class SteamClient {
@@ -82,7 +108,7 @@ export class SteamClient {
   /** Concurrent misses for the same app share one upstream call. */
   getDetails(appId: string): Promise<GameDetails> {
     const cached = this.cache[appId];
-    if (cached && this.now() - cached.at < CACHE_TTL_MS) return Promise.resolve(cached.details);
+    if (cached && this.now() - cached.at < CACHE_TTL_MS && hasCurrentShape(cached.details)) return Promise.resolve(cached.details);
     let pending = this.inFlight.get(appId);
     if (!pending && this.inBackoff(appId)) return Promise.reject(new Error('Steam backoff: not retrying yet'));
     if (!pending) {

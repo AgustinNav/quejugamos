@@ -326,21 +326,31 @@ function dropAll(res) {
 
 // ---------- steam proxy (same shape as v1 server.js) ----------
 
-function pickMovie(movies = []) {
-  const movie = movies.find((m) => m.highlight) || movies[0];
-  if (!movie) return null;
-  return { name: movie.name, poster: movie.thumbnail, hls: movie.hls_h264 || null, mp4: movie.mp4?.max || movie.mp4?.['480'] || null };
+// Mirrors src/steam.ts: highlighted trailers first, max 6 movies / 12 screenshots.
+function toMovie(m) {
+  const hls = m?.hls_h264 || null;
+  const mp4 = m?.mp4?.max || m?.mp4?.['480'] || null;
+  return hls || mp4 ? { name: String(m.name ?? ''), poster: m.thumbnail || null, hls, mp4 } : null;
+}
+
+function pickMovies(movies = []) {
+  const ordered = [...movies.filter((m) => m?.highlight), ...movies.filter((m) => !m?.highlight)];
+  return ordered.map(toMovie).filter(Boolean).slice(0, 6);
 }
 
 function toGameDetails(data) {
+  const movies = pickMovies(data.movies);
+  const shots = (data.screenshots || []).filter((s) => typeof s?.path_full === 'string').slice(0, 12);
   return {
     name: data.name,
     isFree: data.is_free,
     price: data.price_overview || null,
     shortDescription: data.short_description,
     header: data.header_image,
-    screenshots: (data.screenshots || []).slice(0, 4).map((s) => s.path_full),
-    movie: pickMovie(data.movies),
+    screenshots: shots.map((s) => s.path_full),
+    screenshotThumbs: shots.map((s) => s.path_thumbnail || s.path_full),
+    movie: movies[0] ?? null,
+    movies,
     genres: (data.genres || []).map((g) => g.description),
     categories: (data.categories || []).map((c) => c.description),
     reviews: data.recommendations?.total || null,
