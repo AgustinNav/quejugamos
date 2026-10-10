@@ -18,18 +18,30 @@ let active = null;
 export const activeRoom = () => active;
 
 export function enterRoom(code) {
-  const room = { code, session: null, isHost: false, state: null, es: null, busy: false, disposed: false, pendingVote: null, retryTimer: null, stopKeepAlive: startKeepAlive(code) };
+  const room = {
+    code, session: null, isHost: false, state: null, es: null, busy: false, disposed: false,
+    // myVote: own vote on the open card ({ gameId, vote }); snapshots only say who voted, not what.
+    pendingVote: null, myVote: null, retryTimer: null, stopKeepAlive: startKeepAlive(code), onVisible: null,
+  };
+  room.onVisible = () => { if (document.visibilityState === 'visible') resync(room); };
+  document.addEventListener('visibilitychange', room.onVisible);
   active = room;
   showRoomBadge(code);
   boot(room);
   return () => leaveRoom(room);
 }
 
-function leaveRoom(room) {
+// Stops every async path (SSE, retries, keep-alive, visibility) so nothing repaints this room.
+function disposeRoom(room) {
   room.disposed = true;
   room.stopKeepAlive();
   room.es?.close();
   clearTimeout(room.retryTimer);
+  document.removeEventListener('visibilitychange', room.onVisible);
+}
+
+function leaveRoom(room) {
+  disposeRoom(room);
   resetMedia();
   forgetRenderedGame();
   setConnBadge(false);
@@ -51,8 +63,20 @@ async function boot(room) {
   setSession(room, loadSession(room.code));
   if (room.session && !snapshot.players.some((p) => p.id === room.session.playerId)) forgetSession(room);
   if (!room.session) return showJoinOrResults(room, snapshot);
+  await loadMyVote(room);
+  if (room.disposed) return;
   applySnapshot(room, snapshot);
   connect(room);
+}
+
+// Restores the own vote on the open card after a reload; failures just leave it unknown.
+async function loadMyVote(room) {
+  try {
+    const me = await api.me(room.code, room.session.playerToken);
+    room.myVote = { gameId: me.gameId, vote: me.vote };
+  } catch (err) {
+    console.warn('[room] could not load own vote:', err.code);
+  }
 }
 
 function setSession(room, session) {
@@ -67,15 +91,20 @@ function forgetSession(room) {
   setSession(room, null);
 }
 
-function failRoom(room, code) {
-  if (code === 'room_not_found' || code === 'closed') clearSession(room.code);
-  room.stopKeepAlive();
-  room.es?.close();
+const SESSION_ENDING_ERRORS = new Set(['room_not_found', 'closed', 'kicked', 'unauthorized']);
+const RELOADABLE_ERRORS = { network: 'Reintentar', unauthorized: 'Volver a entrar', kicked: 'Volver a entrar' };
+
+export function failRoom(room, code) {
+  if (room.disposed) return;
+  if (SESSION_ENDING_ERRORS.has(code)) clearSession(room.code);
+  disposeRoom(room);
   resetMedia();
   setConnBadge(false);
-  const retry = code === 'network' ? () => location.reload() : null;
-  showError(code, { onRetry: retry });
+  const retryLabel = RELOADABLE_ERRORS[code];
+  showError(code, retryLabel ? { onRetry: () => location.reload(), retryLabel } : {});
 }
+
+const isKicked = (room, snapshot) => Boolean(room.session && !snapshot.players.some((p) => p.id === room.session.playerId));
 
 function showJoinOrResults(room, snapshot) {
   if (snapshot.phase === 'finished') {
@@ -128,16 +157,37 @@ function onStreamError(room, es) {
 
 function scheduleReconnect(room) {
   clearTimeout(room.retryTimer);
-  room.retryTimer = setTimeout(async () => {
-    if (room.disposed) return;
-    try {
-      applySnapshot(room, await api.getRoom(room.code));
-      connect(room);
-    } catch (err) {
-      if (err.code === 'room_not_found') return failRoom(room, 'closed');
-      scheduleReconnect(room);
-    }
-  }, RECONNECT_DELAY_MS);
+  room.retryTimer = setTimeout(() => reconnect(room), RECONNECT_DELAY_MS);
+}
+
+async function reconnect(room) {
+  clearTimeout(room.retryTimer);
+  if (room.disposed) return;
+  try {
+    applySnapshot(room, await api.getRoom(room.code));
+    connect(room);
+  } catch (err) {
+    if (err.code === 'room_not_found') return failRoom(room, 'closed');
+    scheduleReconnect(room);
+  }
+}
+
+/** Refetches the snapshot; used when the stream may have missed events (frozen phone, stale vote). */
+export async function refreshRoom(room) {
+  try {
+    applySnapshot(room, await api.getRoom(room.code));
+  } catch (err) {
+    if (err.code === 'room_not_found') failRoom(room, 'closed');
+    else console.warn('[room] refresh failed:', err.code);
+  }
+}
+
+// A locked phone can freeze or kill the EventSource without firing `error`. On return, reopen a
+// non-OPEN stream right away and always refetch once (a frozen stream may still report OPEN).
+function resync(room) {
+  if (room.disposed || !room.session) return;
+  if (!room.es || room.es.readyState !== EventSource.OPEN) return void reconnect(room);
+  refreshRoom(room);
 }
 
 function setConnBadge(visible) {
@@ -155,6 +205,10 @@ function showRoomBadge(code) {
 export function applySnapshot(room, snapshot) {
   if (room.disposed || !snapshot) return false;
   if (room.state && snapshot.version <= room.state.version) return false;
+  if (isKicked(room, snapshot)) {
+    failRoom(room, 'kicked');
+    return false;
+  }
   const prev = room.state;
   room.state = snapshot;
   if (!room.busy) render(room, prev);
@@ -195,5 +249,12 @@ export function renderPhase(room) {
 export function myVote(room) {
   const gameId = currentGameId(room.state);
   if (room.pendingVote?.gameId === gameId) return room.pendingVote.vote;
-  return room.state.votes[gameId]?.[room.session.playerId] ?? null;
+  // currentVoters is the authority on *whether* I voted (undo/kick clear votes server-side);
+  // the locally kept vote only says which one.
+  if (!room.state.currentVoters?.includes(room.session.playerId)) return null;
+  return room.myVote?.gameId === gameId ? room.myVote.vote : null;
+}
+
+export function setMyVote(room, gameId, vote) {
+  room.myVote = { gameId, vote };
 }

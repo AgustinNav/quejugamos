@@ -217,6 +217,14 @@ a { color: inherit; }
 .voter-list li.voted { border-color: var(--like); }
 .voter-list li.voted .voter-mark { color: var(--like); font-weight: 700; }
 .voter-list li.pending .voter-mark { color: var(--muted); animation: pulse 1.2s ease-in-out infinite; }
+.voter-list li .voter-name { flex: 1; }
+/* host-only "remove player" button, in the lobby chips and the who-voted panel */
+.kick-btn {
+  flex: none; width: 26px; height: 26px; padding: 0; border-radius: 50%; cursor: pointer;
+  font: inherit; font-size: 13px; line-height: 1; color: var(--muted);
+  background: transparent; border: 1px solid var(--border);
+}
+.kick-btn:hover, .kick-btn:focus-visible { color: var(--nope); border-color: currentColor; }
 .host-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .kbd-help { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.8; }
 kbd {
