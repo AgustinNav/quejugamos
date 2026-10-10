@@ -1,0 +1,18 @@
+# Allowlist: ignore everything, then re-include only what the runtime image needs.
+# Safer than a denylist: a new secret/dump file at the repo root can never leak into the build context.
+*
+
+!package.json
+!package-lock.json
+!src/
+!public/
+
+# Never ship tests, caches or local artifacts even if they live under an allowed dir.
+**/*.test.ts
+**/*.test.js
+**/.steam-cache.json
+**/node_modules
+**/.DS_Store
+
+# Explicit (already covered by `*`), kept for readers grepping for them:
+# .git  .github  .claude  test/  docs/  tools/  scripts/  .env  *.log  server.js (v1)
