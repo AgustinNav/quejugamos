@@ -48,6 +48,25 @@ export function parseFilters(input: unknown, knownPlatforms: readonly string[]):
   return { platforms, maxPrice, fitsGroup: input.fitsGroup };
 }
 
+export const MAX_EXCLUDED_GAMES = 200;
+
+/**
+ * Optional `filters.excludeGameIds`: games the host already played (remembered on the host's device).
+ * Parsed apart from parseFilters because it only shapes the deck and is never stored in the room.
+ * Unknown ids are rejected (not ignored) so a client bug shows up instead of silently doing nothing.
+ */
+export function parseExcludeGameIds(filters: unknown, knownGameIds: ReadonlySet<string>): string[] {
+  const value = isPlainObject(filters) ? filters.excludeGameIds : undefined;
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_EXCLUDED_GAMES) {
+    throw invalidFilters(`excludeGameIds must be an array of at most ${MAX_EXCLUDED_GAMES} game ids`);
+  }
+  for (const id of value) {
+    if (typeof id !== 'string' || !knownGameIds.has(id)) throw invalidFilters('excludeGameIds contains an unknown game id');
+  }
+  return [...new Set(value as string[])];
+}
+
 /** Same rule as the v1 client: free games cost 0, unknown prices are null (and pass the filter). */
 export function priceFromDetails(game: CatalogGame, details: { isFree?: boolean; price?: { final: number } | null } | null): number | null {
   if (details?.isFree || game.priceLabel === 'Gratis') return 0;
@@ -78,7 +97,10 @@ export function buildDeck(
   playerCount: number,
   prices: PriceMap,
   randomInt: (maxExclusive: number) => number,
+  excluded: ReadonlySet<string> = new Set(),
 ): string[] {
-  const ids = games.filter((g) => matchesFilters(g, filters, playerCount, prices)).map((g) => g.id);
+  const ids = games
+    .filter((g) => !excluded.has(g.id) && matchesFilters(g, filters, playerCount, prices))
+    .map((g) => g.id);
   return shuffle(ids, randomInt);
 }
