@@ -28,14 +28,14 @@ const MESSAGES = {
   internal: 'Se nos rompió algo del lado del servidor. Probá de nuevo en un ratito.',
   network: 'Sin conexión con el servidor. Revisá tu internet y probá de nuevo.',
   invalid_code: 'Ese código no parece válido: son 6 letras o números (por ej. K7Q2MX).',
-  closed: 'La sala se cerró por inactividad (2 horas sin movimiento). Creá una nueva para seguir.',
+  closed: 'La sala se cerró (expiró tras 2 horas sin movimiento o se reinició el servidor). Creá una nueva para seguir.',
 };
 
 const TITLES = {
   room_not_found: 'Sala no encontrada',
   room_full: 'Sala llena',
   room_finished: 'Votación terminada',
-  closed: 'La sala expiró',
+  closed: 'La sala se cerró',
   invalid_code: 'Código inválido',
   network: 'Sin conexión',
   capacity: 'Estamos a full',
