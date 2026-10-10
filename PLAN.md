@@ -1,4 +1,4 @@
-# GameMatch v2 — Plan de publicación
+# ¿Qué Jugamos? (ex GameMatch) v2 — Plan de publicación
 
 **Fecha:** 2026-10-09 · **Estado:** propuesto · **Audiencia:** sesión de ejecución (Claude) + Agus
 

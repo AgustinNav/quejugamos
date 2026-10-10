@@ -1,7 +1,7 @@
 // Per-room credentials in localStorage. Storage can throw (private mode, blocked cookies):
 // the app keeps working, the session just won't survive a reload.
 
-const PREFIX = 'gamematch:room:';
+const PREFIX = 'quejugamos:room:';
 
 export function loadSession(code) {
   try {

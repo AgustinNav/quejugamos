@@ -1,4 +1,4 @@
-# GameMatch v2 — API contract
+# ¿Qué Jugamos? v2 — API contract
 
 Source of truth shared by backend and frontend. Change it only with both sides updated in the same PR.
 
@@ -70,4 +70,4 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB). All er
 ## Frontend routes (the server serves `public/index.html` for these)
 
 - `/` — landing: create a room (host name) or join with a code.
-- `/r/:code` — the room. No token in `localStorage['gamematch:room:<CODE>']` → join form. Host → host view (large card, QR, who already voted). Others → phone view.
+- `/r/:code` — the room. No token in `localStorage['quejugamos:room:<CODE>']` → join form. Host → host view (large card, QR, who already voted). Others → phone view.
