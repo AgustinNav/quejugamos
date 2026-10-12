@@ -11,6 +11,7 @@ import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
 import { renderVoting, forgetRenderedGame, announceResult, currentGameId, gameName } from './views/voting.js';
 import { renderResults } from './views/results.js';
+import { closeRankingSheet, syncRankingSheet } from './ranking-sheet.js';
 
 const RECONNECT_DELAY_MS = 3000;
 
@@ -35,6 +36,7 @@ export function enterRoom(code) {
 // Stops every async path (SSE, retries, keep-alive, visibility) so nothing repaints this room.
 function disposeRoom(room) {
   room.disposed = true;
+  closeRankingSheet({ resume: false });
   room.stopKeepAlive();
   room.es?.close();
   clearTimeout(room.retryTimer);
@@ -250,6 +252,9 @@ export function renderPhase(room) {
   $('progress').hidden = phase !== 'voting';
   $('progress').textContent = `${Math.min(index + 1, deck.length)} / ${deck.length}`;
   if (phase !== 'voting') resetMedia();
+  // An early finish undone reopens the same card: it must render (and load its trailer) again.
+  if (phase !== 'voting') forgetRenderedGame();
+  syncRankingSheet(room.state);
   if (phase === 'lobby') return room.isHost ? renderHostLobby(room) : renderPlayerLobby(room);
   if (phase === 'voting') return renderVoting(room, myVote(room));
   renderResults(room.state);

@@ -5,6 +5,7 @@ import { errorMessage } from './errors.js';
 import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
 import { currentGameId, gameName } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
+import { bindRankingSheet } from './ranking-sheet.js';
 import { bindPlayedHint, excludedGameIds } from './played.js';
 import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
 import { bindSwipe } from './swipe.js';
@@ -61,6 +62,13 @@ async function hostAction(call) {
 
 export const forceNext = () => hostAction(api.next);
 export const undo = () => hostAction(api.undo);
+
+// Ends voting for everyone; the open card is discarded. Undo right after brings it back.
+export function finishVoting() {
+  if (!activeRoom()?.isHost) return;
+  if (!window.confirm('¿Terminar la votación para todos? Se muestra el ranking con lo votado hasta ahora.')) return;
+  hostAction(api.finish);
+}
 
 // "Ya lo jugamos": any player skips the open card for the whole room (it never counts as a match).
 export async function skipCurrentGame() {
@@ -121,7 +129,7 @@ const KEYS = {
   g: openCardGallery,
   G: openCardGallery,
 };
-const HOST_KEYS = { n: forceNext, N: forceNext, z: undo, Z: undo, Backspace: undo };
+const HOST_KEYS = { n: forceNext, N: forceNext, z: undo, Z: undo, Backspace: undo, f: finishVoting, F: finishVoting };
 
 function onKeydown(e) {
   const room = activeRoom();
@@ -139,6 +147,9 @@ export function bindActions() {
   $('nextBtn').addEventListener('click', forceNext);
   $('undoBtn').addEventListener('click', undo);
   $('playedBtn').addEventListener('click', skipCurrentGame);
+  $('finishBtn').addEventListener('click', finishVoting);
+  $('resumeVotingBtn').addEventListener('click', undo);
+  bindRankingSheet(() => activeRoom()?.state);
   bindPlayedHint();
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);
