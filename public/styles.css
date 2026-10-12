@@ -349,6 +349,8 @@ body.is-phone .vote-btn { min-height: 88px; font-size: 44px; }
 .played-btn { align-self: flex-start; min-height: 48px; }
 body.is-phone .played-btn { align-self: stretch; }
 body.is-phone .stamp.played { font-size: 26px; }
+/* The skip toast lands right when people vote the next card: keep it above the fixed vote bar. */
+body.is-phone .toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
 .played-hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .link-btn {
   font: inherit; color: var(--accent); background: none; border: none; padding: 0 6px; cursor: pointer;
