@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { UpstreamQueue } from '../src/upstream-queue.ts';
 import net from 'node:net';
 import { startServer } from '../src/server.ts';
 import type { AppOptions, RunningServer } from '../src/server.ts';
@@ -25,6 +26,8 @@ export async function startTestServer(options: AppOptions = {}): Promise<TestSer
     fetchImpl: stubFetch(steamCalls),
     now: () => clock.t,
     priceTimeoutMs: 500,
+    // Production spaces Steam calls 200 ms apart; tests use the stub, so no spacing.
+    steamQueue: new UpstreamQueue({ maxConcurrent: 50, minIntervalMs: 0 }),
     ...options,
     config: { port: 0, host: '127.0.0.1', cacheFile: null, trustedProxyHops: 0, logProxyHeaders: false, ...options.config },
   });

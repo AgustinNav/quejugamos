@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SteamClient } from '../src/steam.ts';
+import { UpstreamQueue } from '../src/upstream-queue.ts';
 import type { CatalogGame } from '../src/deck.ts';
 
 const GAMES: CatalogGame[] = [
@@ -182,5 +183,45 @@ describe('SteamClient cache written by older versions', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('SteamClient upstream queue', () => {
+  /** Catalog big enough to reproduce the cold-start burst (the real one has ~100 Steam games). */
+  const BIG: CatalogGame[] = Array.from({ length: 30 }, (_, i) => ({ id: `g${i}`, steamId: 1000 + i, players: [1, 4], platforms: ['PC'] }));
+
+  function trackingClient() {
+    let running = 0;
+    let peak = 0;
+    const calls: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const appId = new URL(String(input)).searchParams.get('appids') ?? '';
+      calls.push(appId);
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running -= 1;
+      const data = { name: `Game ${appId}`, is_free: false, price_overview: { final: 999 } };
+      return new Response(JSON.stringify({ [appId]: { success: true, data } }), { status: 200 });
+    }) as typeof fetch;
+    const queue = new UpstreamQueue({ maxConcurrent: 3, minIntervalMs: 0 });
+    const client = new SteamClient({ games: BIG, country: 'ar', fetchImpl, cacheFile: null, log: () => {}, queue });
+    return { client, calls, peak: () => peak };
+  }
+
+  test('a cold catalog price lookup never exceeds the concurrency cap', async () => {
+    const { client, calls, peak } = trackingClient();
+    const prices = await client.getCatalogPrices(10_000);
+    assert.equal(calls.length, 30);
+    assert.equal(peak(), 3);
+    assert.equal(prices.get('g0'), 9.99);
+  });
+
+  test('a card someone is looking at jumps ahead of the background warm-up', async () => {
+    const { client, calls } = trackingClient();
+    client.warmCache();
+    const details = await client.getDetails('1029');
+    assert.equal(details.name, 'Game 1029');
+    assert.ok(calls.indexOf('1029') < 6, `interactive request started at position ${calls.indexOf('1029')}`);
   });
 });

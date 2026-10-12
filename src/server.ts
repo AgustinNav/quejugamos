@@ -19,6 +19,7 @@ import type { ApiDeps, Handler, RouteContext } from './routes.ts';
 import { SseHub } from './sse.ts';
 import type { SseHubOptions } from './sse.ts';
 import { SteamClient } from './steam.ts';
+import type { UpstreamQueue } from './upstream-queue.ts';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -88,6 +89,7 @@ export type AppOptions = {
   sse?: SseHubOptions;
   priceTimeoutMs?: number;
   requestTimeoutMs?: number;
+  steamQueue?: UpstreamQueue;
 };
 
 export type App = {
@@ -109,6 +111,7 @@ function buildDeps(config: AppConfig, options: AppOptions, log: Logger): ApiDeps
   const store = new RoomStore({ now, randomInt, uuid: randomUUID, onExpire }, { ...DEFAULT_LIMITS, ...options.limits });
   const steam = new SteamClient({
     games: GAMES, country: config.country, fetchImpl: options.fetchImpl, cacheFile: config.cacheFile, now, log,
+    queue: options.steamQueue,
   });
   return {
     store, hub, steam, log, games: GAMES, platforms: PLATFORMS, randomInt, priceTimeoutMs: options.priceTimeoutMs ?? 4000,

@@ -102,8 +102,9 @@ export class SteamClient {
     this.options = options;
     this.allowed = new Set(options.games.filter((g) => g.steamId).map((g) => String(g.steamId)));
     this.cache = this.loadCache();
+    // Spacing is wall-clock time (real timers), so the queue never uses the injectable business clock.
     this.queue = options.queue ?? new UpstreamQueue({
-      maxConcurrent: MAX_CONCURRENT_REQUESTS, minIntervalMs: MIN_REQUEST_INTERVAL_MS, now: options.now,
+      maxConcurrent: MAX_CONCURRENT_REQUESTS, minIntervalMs: MIN_REQUEST_INTERVAL_MS,
     });
   }
 
