@@ -1,0 +1,21 @@
+==> Deploying...
+{"severity":"INFO","message":"server_started","event":"server_started","time":"2026-10-12T09:00:00.000Z","url":"http://localhost:10000"}
+2026-10-12T21:00:01.123Z {"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-12T21:00:01.120Z","roomCode":"AAAAAA","liveRooms":1,"ref":"tt","viaGuest":false}
+{"severity":"INFO","message":"player_joined","event":"player_joined","time":"2026-10-12T21:01:00.000Z","roomCode":"AAAAAA","playerId":"p_1","players":2,"phase":"lobby"}
+{"severity":"INFO","message":"player_joined","event":"player_joined","time":"2026-10-12T21:01:05.000Z","roomCode":"AAAAAA","playerId":"p_2","players":3,"phase":"lobby"}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T21:05:00.000Z","roomCode":"AAAAAA","gameId":"valheim","likes":3,"nopes":0,"match":true,"finished":false}
+{"severity":"INFO","message":"card_reopened","event":"card_reopened","time":"2026-10-12T21:05:10.000Z","roomCode":"AAAAAA","gameId":"valheim"}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T21:05:20.000Z","roomCode":"AAAAAA","gameId":"valheim","likes":2,"nopes":1,"match":false,"finished":false}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T21:06:00.000Z","roomCode":"AAAAAA","gameId":"lethal-company","likes":3,"nopes":0,"match":true,"finished":false}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T21:07:00.000Z","roomCode":"AAAAAA","gameId":"phasmophobia","likes":3,"nopes":0,"match":true,"finished":true}
+{"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-12T22:00:00.000Z","roomCode":"BBBBBB","liveRooms":2,"ref":"direct","viaGuest":true}
+{"severity":"INFO","message":"card_skipped","event":"card_skipped","time":"2026-10-12T22:03:00.000Z","roomCode":"BBBBBB","gameId":"valheim","finished":false}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T22:04:00.000Z","roomCode":"BBBBBB","gameId":"terraria","likes":1,"nopes":1,"match":false,"finished":false}
+not json at all {broken
+{"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-12T23:59:59.999Z","roomCode":"CCCCCC","liveRooms":3}
+{"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-13T00:00:00.000Z","roomCode":"DDDDDD","liveRooms":1,"ref":"other","viaGuest":false}
+{"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-13T00:10:00.000Z","roomCode":"EEEEEE","liveRooms":2,"ref":"tt","viaGuest":true}
+{"severity":"INFO","message":"player_joined","event":"player_joined","time":"2026-10-13T00:11:00.000Z","roomCode":"EEEEEE","playerId":"p_9","players":2,"phase":"lobby"}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-13T00:20:00.000Z","roomCode":"EEEEEE","gameId":"valheim","likes":2,"nopes":0,"match":true,"finished":false}
+{"severity":"INFO","message":"room_created","event":"room_created","roomCode":"NOTIME","ref":"tt"}
+[1,2,3]
