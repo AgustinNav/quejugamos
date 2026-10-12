@@ -12,7 +12,6 @@ let items = [];
 let index = 0;
 let player = null;
 let onClose = null;
-let resumeOnClose = true;
 let unsubscribeAudio = null;
 
 /** Gallery items from Steam details; tolerates old cache entries that only have `movie`. */
@@ -27,12 +26,13 @@ export function galleryItems(details) {
   ];
 }
 
-export const isGalleryOpen = () => $('gallery').open;
+let active = false;
 
-// onClose({ resume }) runs once the dialog is closed; resume=false when the card changed under it.
+// onClose({ resume }) runs once the gallery is closed; resume=false when the card changed under it.
 export function openGallery({ title, items: list, start = 0, onClose: closeCallback }) {
   const dialog = $('gallery');
-  if (dialog.open || !list.length) return;
+  if (active || !list.length) return;
+  active = true;
   items = list;
   onClose = closeCallback;
   $('galleryTitle').textContent = title;
@@ -48,15 +48,20 @@ export function openGallery({ title, items: list, start = 0, onClose: closeCallb
   $('galleryClose').focus();
 }
 
+// Teardown runs synchronously here: the dialog's `close` event is async and some embedded
+// Chromium builds never fire it, which left the trailer playing behind a closed dialog.
 export function closeGallery({ resume = true } = {}) {
+  if (!active) return;
+  active = false;
+  teardown();
   const dialog = $('gallery');
-  if (!dialog.open) return;
-  resumeOnClose = resume;
-  dialog.close();
+  if (dialog.open) dialog.close();
+  const callback = onClose;
+  onClose = null;
+  callback?.({ resume });
 }
 
-// Runs for every way of closing (button, Esc, closeGallery): the dialog's own `close` event.
-function onDialogClose() {
+function teardown() {
   stopGalleryVideo();
   $('galleryImg').removeAttribute('src');
   $('galleryThumbs').replaceChildren();
@@ -65,11 +70,6 @@ function onDialogClose() {
   unsubscribeAudio = null;
   document.body.classList.remove('gallery-open');
   items = [];
-  const callback = onClose;
-  const resume = resumeOnClose;
-  onClose = null;
-  resumeOnClose = true;
-  callback?.({ resume });
 }
 
 function thumbButton(item, i) {
@@ -185,7 +185,9 @@ function inControlsZone(e) {
 
 export function bindGallery() {
   const dialog = $('gallery');
-  dialog.addEventListener('close', onDialogClose);
+  // Esc handled by the browser (close watcher) instead of our keydown: route it through closeGallery.
+  dialog.addEventListener('cancel', (e) => { e.preventDefault(); closeGallery(); });
+  dialog.addEventListener('close', () => closeGallery());
   $('galleryClose').addEventListener('click', () => closeGallery());
   $('galleryPrev').addEventListener('click', () => step(-1));
   $('galleryNext').addEventListener('click', () => step(1));
