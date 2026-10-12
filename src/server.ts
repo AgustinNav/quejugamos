@@ -13,12 +13,13 @@ import type { RateLimiter } from './http.ts';
 import { createLogger } from './log.ts';
 import type { Logger } from './log.ts';
 import { DEFAULT_LIMITS, RoomError, RoomStore } from './rooms.ts';
-import type { RoomLimits } from './rooms.ts';
+import type { ExpireReason, RoomLimits } from './rooms.ts';
 import * as routes from './routes.ts';
 import type { ApiDeps, Handler, RouteContext } from './routes.ts';
 import { SseHub } from './sse.ts';
 import type { SseHubOptions } from './sse.ts';
 import { SteamClient } from './steam.ts';
+import { StreamTicketStore } from './tickets.ts';
 import type { UpstreamQueue } from './upstream-queue.ts';
 
 const MIME: Record<string, string> = {
@@ -77,6 +78,8 @@ const ROUTES: Route[] = [
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/kick$/, handler: routes.kickPlayer },
   { method: 'GET', pattern: /^\/api\/rooms\/([^/]+)\/events$/, handler: routes.roomEvents },
   { method: 'GET', pattern: /^\/api\/rooms\/([^/]+)\/me$/, handler: routes.myVote },
+  { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/close$/, handler: routes.closeRoom },
+  { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/stream-ticket$/, handler: routes.streamTicket },
   { method: 'GET', pattern: /^\/api\/steam\/(\d{1,10})$/, handler: routes.steamDetails },
 ];
 
@@ -103,10 +106,13 @@ export type App = {
 
 function buildDeps(config: AppConfig, options: AppOptions, log: Logger): ApiDeps {
   const now = options.now ?? Date.now;
-  const hub = new SseHub(options.sse);
-  const onExpire = (code: string) => {
+  const tickets = new StreamTicketStore({ now });
+  // The store is created below: presence reports only arrive once streams connect, after this returns.
+  const hub = new SseHub({ ...options.sse, onPresence: (code, live) => store.setPresence(code, live) });
+  const onExpire = (code: string, reason: ExpireReason) => {
     hub.close(code);
-    log('room_expired', { roomCode: code });
+    tickets.dropRoom(code);
+    log('room_expired', { roomCode: code, reason });
   };
   const store = new RoomStore({ now, randomInt, uuid: randomUUID, onExpire }, { ...DEFAULT_LIMITS, ...options.limits });
   const steam = new SteamClient({
@@ -114,7 +120,7 @@ function buildDeps(config: AppConfig, options: AppOptions, log: Logger): ApiDeps
     queue: options.steamQueue,
   });
   return {
-    store, hub, steam, log, games: GAMES, platforms: PLATFORMS, randomInt, priceTimeoutMs: options.priceTimeoutMs ?? 4000,
+    store, hub, tickets, steam, log, games: GAMES, platforms: PLATFORMS, randomInt, priceTimeoutMs: options.priceTimeoutMs ?? 4000,
   };
 }
 
@@ -251,7 +257,7 @@ export function createApp(options: AppOptions = {}): App {
     Promise.resolve().then(() => handle(req, res)).catch((err) => handleError(err, res, log));
   });
   server.maxConnections = MAX_CONNECTIONS;
-  const sweep = setInterval(() => deps.store.expire(), EXPIRY_SWEEP_MS);
+  const sweep = setInterval(() => { deps.store.expire(); deps.tickets.prune(); }, EXPIRY_SWEEP_MS);
   sweep.unref();
   const close = () => new Promise<void>((resolve) => {
     clearInterval(sweep);

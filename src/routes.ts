@@ -6,6 +6,8 @@ import { bearerToken, readJsonBody, sendError, sendJson } from './http.ts';
 import type { Logger } from './log.ts';
 import type { RoomStore, Snapshot } from './rooms.ts';
 import type { SseHub } from './sse.ts';
+import { TICKET_PATTERN } from './tickets.ts';
+import type { StreamTicketStore } from './tickets.ts';
 
 // Headers-only answer for HEAD on the events path (see roomEvents).
 const SSE_HEAD_HEADERS = { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' };
@@ -16,6 +18,7 @@ import type { SteamClient } from './steam.ts';
 export type ApiDeps = {
   store: RoomStore;
   hub: SseHub;
+  tickets: StreamTicketStore;
   steam: SteamClient;
   log: Logger;
   games: readonly CatalogGame[];
@@ -50,8 +53,9 @@ export const createRoom: Handler = async (deps, { req, res, ip }) => {
   sendJson(res, 201, created);
 };
 
-export const getRoom: Handler = (deps, { res, code }) => {
-  sendJson(res, 200, deps.store.snapshot(code));
+// Members (bearer token of THIS room) get the full snapshot; anyone else only the public view.
+export const getRoom: Handler = (deps, { req, res, code }) => {
+  sendJson(res, 200, deps.store.view(code, bearerToken(req)));
 };
 
 export const joinRoom: Handler = async (deps, { req, res, code }) => {
@@ -127,8 +131,36 @@ export const kickPlayer: Handler = async (deps, { req, res, code }) => {
   sendJson(res, 200, after);
 };
 
+export const closeRoom: Handler = async (deps, { req, res, code }) => {
+  await readJsonBody(req);
+  // Removal goes through onExpire: streams get `closed`, tickets are dropped, room_expired is logged.
+  deps.store.close(code, bearerToken(req));
+  sendJson(res, 200, { closed: true });
+};
+
+export const streamTicket: Handler = async (deps, { req, res, code }) => {
+  await readJsonBody(req);
+  const playerId = deps.store.playerId(code, bearerToken(req));
+  sendJson(res, 200, { ticket: deps.tickets.issue(code.toUpperCase(), playerId) });
+};
+
+/** The `ticket` query parameter, or null when missing, repeated or malformed. Never logged. */
+function ticketParam(rawUrl: string | undefined): string | null {
+  try {
+    const values = new URL(rawUrl ?? '/', 'http://localhost').searchParams.getAll('ticket');
+    return values.length === 1 && TICKET_PATTERN.test(values[0]) ? values[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 export const roomEvents: Handler = (deps, { req, res, code, ip }) => {
   const snapshot = deps.store.snapshot(code);
+  const ticket = ticketParam(req.url);
+  const playerId = ticket ? deps.tickets.consume(ticket, snapshot.code) : null;
+  if (!playerId || !deps.store.hasPlayer(snapshot.code, playerId)) {
+    return sendError(res, 401, 'unauthorized', 'Missing, expired or already used stream ticket');
+  }
   // HEAD must not hold a stream slot open: answer the headers and end.
   if (req.method === 'HEAD') return void res.writeHead(200, SSE_HEAD_HEADERS).end();
   if (!deps.hub.connect(snapshot.code, res, snapshot, ip)) {
