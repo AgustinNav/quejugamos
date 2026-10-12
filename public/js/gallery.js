@@ -27,12 +27,14 @@ export function galleryItems(details) {
 }
 
 let active = false;
+let returnFocusTo = null;
 
 // onClose({ resume }) runs once the gallery is closed; resume=false when the card changed under it.
 export function openGallery({ title, items: list, start = 0, onClose: closeCallback }) {
   const dialog = $('gallery');
   if (active || !list.length) return;
   active = true;
+  returnFocusTo = document.activeElement;
   items = list;
   onClose = closeCallback;
   $('galleryTitle').textContent = title;
@@ -56,6 +58,9 @@ export function closeGallery({ resume = true } = {}) {
   teardown();
   const dialog = $('gallery');
   if (dialog.open) dialog.close();
+  // Not every browser restores focus on dialog close; a hidden opener (card changed) is skipped.
+  if (returnFocusTo?.isConnected && returnFocusTo.offsetParent !== null) returnFocusTo.focus();
+  returnFocusTo = null;
   const callback = onClose;
   onClose = null;
   callback?.({ resume });
