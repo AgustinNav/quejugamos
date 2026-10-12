@@ -319,13 +319,28 @@ async function skip(req, res, room) {
 async function undo(req, res, room) {
   await readJson(req);
   auth(req, room, { host: true });
-  if (room.phase === 'lobby' || room.index === 0) throw new HttpError(409, 'nothing_to_undo', 'Nada para deshacer');
-  room.index -= 1;
-  room.history.pop();
+  const finishedEarly = room.phase === 'finished' && room.index < room.deck.length;
+  if (!finishedEarly && (room.phase === 'lobby' || room.index === 0)) throw new HttpError(409, 'nothing_to_undo', 'Nada para deshacer');
+  if (!finishedEarly) { // after an early finish, the discarded card comes back as is
+    room.index -= 1;
+    room.history.pop();
+    delete room.votes[room.deck[room.index]];
+  }
   room.phase = 'voting';
-  delete room.votes[room.deck[room.index]];
   room.lastResult = null;
   room.botTimers.clear(); // let bots vote again on the reopened card
+  changed(room);
+  sendJson(res, 200, snapshot(room));
+}
+
+// Host ends voting early: the open card is discarded (votes dropped, no result).
+async function finish(req, res, room) {
+  await readJson(req);
+  auth(req, room, { host: true });
+  if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
+  delete room.votes[room.deck[room.index]];
+  room.phase = 'finished';
+  room.lastResult = null;
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
@@ -435,6 +450,7 @@ const ROOM_ROUTES = {
   'POST /vote': vote,
   'POST /next': next,
   'POST /undo': undo,
+  'POST /finish': finish,
   'POST /skip': skip,
   'POST /kick': kick,
   'GET /me': me,

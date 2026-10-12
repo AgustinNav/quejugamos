@@ -7,7 +7,7 @@ Source of truth shared by backend and frontend. Change it only with both sides u
 - **Room**: one voting night. Identified by `code` (6 chars, alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, uppercase; lookups are case-insensitive).
 - **Player**: `{ id, name, isHost }`. The host is also a player (created with the room).
 - **Tokens**: `hostToken` and `playerToken` are opaque secrets (`crypto.randomUUID()`), sent as `Authorization: Bearer <token>`. Player `id` is public; tokens never appear in snapshots or events.
-- **Phases**: `lobby` → `voting` → `finished`.
+- **Phases**: `lobby` → `voting` → `finished`. The host can jump from `voting` to `finished` early (`finish`).
 - **Deck**: list of `gameId` (the `id` field from `public/games.js`), filtered and shuffled **by the server** at start, so every client sees the same order.
 
 ## Snapshot (shape of `GET /api/rooms/:code` and of every SSE `state` event)
@@ -34,7 +34,8 @@ Source of truth shared by backend and frontend. Change it only with both sides u
 - `currentVoters`: ids of the players who already voted on the open card (who, never what). Empty outside `voting`.
 - `lastResult`: the card that was just closed (`null` until the first one). Clients use it for the swipe animation and the "IT'S A MATCH" overlay (`match` = every player liked it).
 - `results`: every closed card, frozen when it closed (`undo` removes the reopened card). Use it for the ranking instead of recomputing from `votes`: players who join later must not change past results.
-- After `undo`, `lastResult` is `null`.
+- After `undo` and after `finish`, `lastResult` is `null`.
+- `phase: "finished"` with `index < deck.length` = the host finished early: `index` cards closed (voted or skipped) out of `deck.length`, and `deck[index]` was discarded (no `results` entry, its votes dropped). After the last card closes normally, `index === deck.length`.
 - A card closed by `skip` ("Ya lo jugamos") has `played: true` and `skippedBy: playerId` in `lastResult`/`results`, with `likes: 0, nopes: 0, match: false` (its votes are discarded). Other results don't carry these fields.
 - `version`: increases by 1 on every change. Clients ignore snapshots with a version ≤ the one they have.
 
@@ -52,7 +53,8 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
 | GET | `/api/rooms/:code/me` | player | — | `200 { playerId, gameId, vote }` — the caller's vote on the open card (`gameId`/`vote` `null` when there is none). Used to restore your own vote after a reload | 401, 404 |
 | POST | `/api/rooms/:code/next` | host | `{}` | `200 Snapshot` (closes the current card even if votes are missing) | 401, 403, 409 `not_voting` |
 | POST | `/api/rooms/:code/skip` | player | `{ "gameId": string }` | `200 Snapshot` (closes the current card as already played; see Rules) | 400 `invalid_game`, 401, 409 `not_current_game`, 409 `not_voting` |
-| POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes) | 401, 403, 409 `nothing_to_undo` |
+| POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes; after an early `finish`, reopens the discarded card instead) | 401, 403, 409 `nothing_to_undo` |
+| POST | `/api/rooms/:code/finish` | host | `{}` | `200 Snapshot` (ends voting now; see Rules) | 401, 403 `not_host`, 409 `not_voting` (lobby or already finished) |
 | POST | `/api/rooms/:code/kick` | host | `{ "playerId": string }` | `200 Snapshot` (removes the player; see Rules) | 400 `invalid_player`, 401, 403 `not_host`, 404 `player_not_found`, 409 `cannot_kick_host` |
 | GET | `/api/rooms/:code/events` | — | — | `text/event-stream` (`HEAD` answers the headers and ends, without opening a stream) | 404, 429, 503 `capacity` |
 | GET | `/api/steam/:appId` | — | — | `200 SteamDetails` (see below; `stale: true` when served from an old cache entry) | 404 `unknown_game`, 429, 502 `steam_unavailable` (a failed app is not retried upstream for 120 s; after a Steam 429, no upstream calls for 60 s) |
@@ -103,6 +105,7 @@ Clients must tolerate a `stale: true` response from an older cache that has only
 - **Auto-advance**: when every player has voted on the current card, the server closes it (sets `lastResult`, `index += 1`). When `index === deck.length`, the phase becomes `finished`.
 - A player who joins mid-voting votes starting from the current card.
 - **Skip ("Ya lo jugamos")**: any player (host included) closes the open card for the whole room through the same path as auto-advance: votes on it are discarded, `lastResult`/`results` get `{ gameId, likes: 0, nopes: 0, match: false, played: true, skippedBy }`, `version` increases, and the phase becomes `finished` if it was the last card. It never counts as a match. `undo` reopens it like any closed card (its `results` entry is removed). Logged as `card_skipped` (`roomCode`, `gameId`; no names). Clients show a "ya lo jugaron" toast/animation instead of LIKE/NOPE.
+- **Finish early**: the host ends voting before the deck runs out. `phase` becomes `finished`; the open card is discarded (its votes are dropped and it gets no `results` entry); closed cards keep their frozen `results`; `lastResult` becomes `null` (no swipe replay); `version` increases. Clients show the normal ranking with "X of Y voted" (`index` of `deck.length`). `undo` right after it reopens that same card (`phase: voting`, same `index`, no votes), so a mis-tap is recoverable; a second `undo` reopens the previous closed card as usual. Logged as `game_finished_early` (`roomCode`, `closedCards`, `deckSize`; no names). Clients can show a partial ranking at any time during `voting` from `results` alone (never recomputed from `votes`).
 - **`filters.excludeGameIds`** (optional, `start` only): up to 200 catalog ids left out of the deck (the host's "ya jugados" memory, kept in the host browser's `localStorage['quejugamos:played']`). Every id must be a known catalog id, otherwise `400 invalid_filters`. Not stored in the room: snapshot `filters` never include it. Other filter fields are parsed independently.
 - **Kick**: the host removes a non-host player (a duplicate entry from another browser, someone who left). The player's token stops working (`401`), their vote on the current card is deleted (closed cards keep their frozen `results`), `version` increases, and if every remaining player already voted the current card closes like an auto-advance (`match` = every remaining player liked it). A client whose `playerId` disappears from a snapshot was kicked: it clears its stored session and shows "El host te sacó de la sala".
 - Names: trimmed (NFC), 1–16 chars. Rejected (`invalid_name`): control/format characters (zero-width, bidi marks, RLM), line/paragraph separators, Hangul fillers (U+3164, U+115F, U+1160, U+FFA0), more than 2 stacked combining marks, and names without at least one letter, digit or emoji. ZWJ is allowed only inside emoji sequences. Unique per room, compared after NFKC + lowercase with invisible code points removed (`ＡＧＵＳ` = `agus`). Cross-script look-alikes (Cyrillic `а` vs Latin `a`) are not detected.
