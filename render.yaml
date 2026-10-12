@@ -20,6 +20,6 @@ services:
       # and set it back to 0: the line contains client IPs. Blueprint sync is manual, so changing
       # these values here does not update an existing service.
       - key: TRUSTED_PROXY_HOPS
-        value: "1"
+        value: "3"
       - key: LOG_PROXY_HEADERS
         value: "0"
