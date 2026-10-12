@@ -53,6 +53,16 @@ async function ticketFor(code: string, token: string): Promise<string> {
 
 const events = (code: string, query = '') => `/api/rooms/${code}/events${query}`;
 
+/** GET that must be refused. A stream opened by mistake is cancelled, so the assertion fails instead of hanging. */
+async function refused(path: string): Promise<{ status: number; body: any }> {
+  const res = await fetch(base + path, { signal: AbortSignal.timeout(2000) });
+  if (res.headers.get('content-type')?.startsWith('text/event-stream')) {
+    await res.body?.cancel();
+    return { status: res.status, body: null };
+  }
+  return { status: res.status, body: await res.json() };
+}
+
 async function waitUntil(predicate: () => boolean, what: string) {
   for (let i = 0; i < 100 && !predicate(); i += 1) await new Promise((r) => setTimeout(r, 10));
   assert.ok(predicate(), what);
@@ -107,7 +117,7 @@ describe('SSE stream tickets', () => {
     assert.equal(first.players.length, 2);
     assert.equal(srv.hub.connectionCount(room.code), 1);
 
-    const reused = await api(base, 'GET', events(room.code, `?ticket=${ticket}`));
+    const reused = await refused(events(room.code, `?ticket=${ticket}`));
     assert.equal(reused.status, 401);
     assert.equal(reused.body.error, 'unauthorized');
     assert.equal(srv.hub.connectionCount(room.code), 1, 'a rejected ticket must not open a stream');
@@ -119,19 +129,19 @@ describe('SSE stream tickets', () => {
     const expired = await ticketFor(room.code, room.hostToken);
     srv.clock.t += 30_000;
     try {
-      assert.equal((await api(base, 'GET', events(room.code, `?ticket=${expired}`))).status, 401, 'expired');
+      assert.equal((await refused(events(room.code, `?ticket=${expired}`))).status, 401, 'expired');
     } finally {
       srv.clock.t -= 30_000;
     }
     const foreign = await ticketFor(other.code, other.hostToken);
-    assert.equal((await api(base, 'GET', events(room.code, `?ticket=${foreign}`))).status, 401, 'other room');
-    assert.equal((await api(base, 'GET', events(other.code, `?ticket=${foreign}`))).status, 401, 'burnt by the failed try');
+    assert.equal((await refused(events(room.code, `?ticket=${foreign}`))).status, 401, 'other room');
+    assert.equal((await refused(events(other.code, `?ticket=${foreign}`))).status, 401, 'burnt by the failed try');
 
     const valid = await ticketFor(room.code, room.hostToken);
     const malformed = ['', '?ticket=', '?ticket=short', `?ticket=${'x'.repeat(200)}`, `?ticket=${valid}&ticket=${valid}`,
       '?ticket=%E0%A4%A', '?ticket=%00', `?Ticket=${valid}`, `?ticket=${room.hostToken}`];
     for (const query of malformed) {
-      const res = await api(base, 'GET', events(room.code, query));
+      const res = await refused(events(room.code, query));
       assert.equal(res.status, 401, query);
       assert.equal(res.body.error, 'unauthorized');
     }
@@ -144,7 +154,7 @@ describe('SSE stream tickets', () => {
     const ana = await join(room.code, 'Ana');
     const ticket = await ticketFor(room.code, ana.playerToken);
     await api(base, 'POST', `/api/rooms/${room.code}/kick`, { playerId: ana.playerId }, room.hostToken);
-    assert.equal((await api(base, 'GET', events(room.code, `?ticket=${ticket}`))).status, 401);
+    assert.equal((await refused(events(room.code, `?ticket=${ticket}`))).status, 401);
     assert.equal((await api(base, 'POST', `/api/rooms/${room.code}/stream-ticket`, {}, ana.playerToken)).status, 401);
     const unknown = await fetch(`${base}/api/rooms/ZZZZZZ/events?ticket=${ticket}`, { headers: { 'X-Forwarded-For': '10.6.6.6' } });
     assert.equal(unknown.status, 404);
