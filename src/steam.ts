@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import { priceFromDetails } from './deck.ts';
 import type { CatalogGame } from './deck.ts';
 import type { Logger } from './log.ts';
+import { UpstreamQueue } from './upstream-queue.ts';
+import type { Priority } from './upstream-queue.ts';
 
 export type GameDetails = {
   name: string;
@@ -20,6 +22,7 @@ export type SteamClientOptions = {
   cacheFile?: string | null;
   now?: () => number;
   log: Logger;
+  queue?: UpstreamQueue;
 };
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -28,6 +31,9 @@ const REQUEST_TIMEOUT_MS = 8000;
 const FAILURE_TTL_MS = 120_000;
 // After Steam answers 429, nobody calls it for this long: hammering a rate limit only extends it.
 const RATE_LIMIT_BACKOFF_MS = 60_000;
+// ~5 requests/s at most: the whole catalog warms in ~25 s without tripping Steam's undocumented limit.
+const MAX_CONCURRENT_REQUESTS = 3;
+const MIN_REQUEST_INTERVAL_MS = 200;
 
 export type Movie = { name: string; poster: string | null; hls: string | null; mp4: string | null };
 
@@ -90,11 +96,15 @@ export class SteamClient {
   private readonly inFlight = new Map<string, Promise<GameDetails>>();
   private readonly failedAt = new Map<string, number>();
   private blockedUntil = 0;
+  private readonly queue: UpstreamQueue;
 
   constructor(options: SteamClientOptions) {
     this.options = options;
     this.allowed = new Set(options.games.filter((g) => g.steamId).map((g) => String(g.steamId)));
     this.cache = this.loadCache();
+    this.queue = options.queue ?? new UpstreamQueue({
+      maxConcurrent: MAX_CONCURRENT_REQUESTS, minIntervalMs: MIN_REQUEST_INTERVAL_MS, now: options.now,
+    });
   }
 
   isAllowed(appId: string): boolean {
@@ -105,17 +115,25 @@ export class SteamClient {
     return this.cache[appId]?.details ?? null;
   }
 
-  /** Concurrent misses for the same app share one upstream call. */
-  getDetails(appId: string): Promise<GameDetails> {
+  /** Concurrent misses for the same app share one upstream call; an interactive caller promotes it. */
+  getDetails(appId: string, priority: Priority = 'interactive'): Promise<GameDetails> {
     const cached = this.cache[appId];
     if (cached && this.now() - cached.at < CACHE_TTL_MS && hasCurrentShape(cached.details)) return Promise.resolve(cached.details);
     let pending = this.inFlight.get(appId);
+    if (pending && priority === 'interactive') this.queue.promote(appId);
     if (!pending && this.inBackoff(appId)) return Promise.reject(new Error('Steam backoff: not retrying yet'));
     if (!pending) {
-      pending = this.request(appId).finally(() => this.inFlight.delete(appId));
+      pending = this.request(appId, priority).finally(() => this.inFlight.delete(appId));
       this.inFlight.set(appId, pending);
     }
     return pending;
+  }
+
+  /** Fills the cache in the background (after a deploy or a Render spin-up the cache is empty). */
+  warmCache(): void {
+    for (const game of this.options.games) {
+      if (game.steamId) this.getDetails(String(game.steamId), 'background').catch(() => {});
+    }
   }
 
   /**
@@ -127,7 +145,7 @@ export class SteamClient {
     for (const game of this.options.games) prices.set(game.id, priceFromDetails(game, this.cachedOrStale(game)));
     const steamGames = this.options.games.filter((g) => g.steamId);
     const lookups = steamGames.map(async (game) => {
-      const details = await this.getDetails(String(game.steamId)).catch(() => null);
+      const details = await this.getDetails(String(game.steamId), 'background').catch(() => null);
       if (details) prices.set(game.id, priceFromDetails(game, details));
     });
     await Promise.race([Promise.allSettled(lookups), delay(timeoutMs)]);
@@ -149,9 +167,9 @@ export class SteamClient {
     return game.steamId ? this.staleDetails(String(game.steamId)) : null;
   }
 
-  private async request(appId: string): Promise<GameDetails> {
+  private async request(appId: string, priority: Priority): Promise<GameDetails> {
     try {
-      const details = await this.fetchDetails(appId);
+      const details = await this.queue.run(appId, priority, () => this.fetchDetails(appId));
       this.failedAt.delete(appId);
       return details;
     } catch (err) {

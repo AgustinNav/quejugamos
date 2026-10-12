@@ -94,6 +94,7 @@ export type App = {
   server: http.Server;
   store: RoomStore;
   hub: SseHub;
+  steam: SteamClient;
   config: AppConfig;
   close: () => Promise<void>;
 };
@@ -256,7 +257,7 @@ export function createApp(options: AppOptions = {}): App {
     server.closeIdleConnections();
     setTimeout(() => server.closeAllConnections(), 2000).unref();
   });
-  return { server, store: deps.store, hub: deps.hub, config, close };
+  return { server, store: deps.store, hub: deps.hub, steam: deps.steam, config, close };
 }
 
 export type RunningServer = App & { port: number; url: string };
@@ -282,6 +283,8 @@ async function main(): Promise<void> {
   });
   const app = await startServer({ log });
   log('server_started', { url: app.url, steamCountry: app.config.country, trustedProxyHops: app.config.trustedProxyHops });
+  // Render's disk is ephemeral: every deploy/spin-up starts with an empty Steam cache.
+  app.steam.warmCache();
   const shutdown = (signal: string) => {
     log('server_stopping', { signal, sseConnections: app.hub.connectionCount() });
     setTimeout(() => process.exit(0), 8000).unref();
