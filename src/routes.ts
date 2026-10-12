@@ -113,7 +113,19 @@ export const undoCard: Handler = async (deps, { req, res, code }) => {
   const before = deps.store.snapshot(code);
   const after = deps.store.undo(code, bearerToken(req));
   publish(deps, before, after);
-  deps.log('card_reopened', { roomCode: after.code, gameId: after.deck[after.index] });
+  // Same index as before = it undid an early finish (the discarded card came back), not a closed card.
+  const afterEarlyFinish = before.phase === 'finished' && before.index === after.index;
+  deps.log('card_reopened', { roomCode: after.code, gameId: after.deck[after.index], afterEarlyFinish });
+  sendJson(res, 200, after);
+};
+
+export const finishRoom: Handler = async (deps, { req, res, code }) => {
+  await readJsonBody(req);
+  const before = deps.store.snapshot(code);
+  const after = deps.store.finish(code, bearerToken(req));
+  publish(deps, before, after);
+  // index = cards that closed (voted or skipped); the open one was discarded.
+  deps.log('game_finished_early', { roomCode: after.code, closedCards: after.index, deckSize: after.deck.length });
   sendJson(res, 200, after);
 };
 
