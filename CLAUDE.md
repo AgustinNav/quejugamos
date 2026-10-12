@@ -76,6 +76,7 @@ Env vars: tabla en `README.md`.
 2. Endpoint nuevo o modificado → test de integración con input malformado (JSON roto, body > 1 KB, content-type incorrecto, token ajeno, código inexistente) que verifique 4xx **y** que el proceso sigue vivo.
 3. Código detrás de un flag de config → un test que lo active (ver Mistakes Log).
 4. Cambio de UI → server real (`npm start`, no solo el mock) + browser: host en desktop y jugador en 375px de ancho, en **dos orígenes distintos** (p. ej. `localhost:3000` y `127.0.0.1:3000`) para que no compartan `localStorage` y se pisen los tokens. Revisar la consola: una violación de CSP es un bug.
+   - **Browser: avisar antes, visible y siempre muted.** Nunca abrir una sesión de browser (pane integrado o Chrome, propia o de un subagente) sin avisarle a Agus en el chat; abierta, tiene que quedar visible. Todo `<video>`/`<audio>` va silenciado: el volumen se verifica leyendo `muted`/`volume`, nunca reproduciendo audio. Al terminar, pausar y cerrar las pestañas. Todo prompt de subagente que pueda usar un browser incluye esta regla.
 5. Cambio en `Dockerfile` o arranque → `./scripts/docker-smoke.sh`.
 
 ## Riesgos abiertos
@@ -91,6 +92,7 @@ Env vars: tabla en `README.md`.
 
 Lecciones universales van al Master, no acá.
 
+- **2026-10-12 — Trailers sonando por los parlantes de Agus.** Subagentes que probaban la galería abrieron pestañas ocultas y reprodujeron trailers con audio; Agus tuvo que preguntar de dónde venía el sonido y pedir que se cerraran todas. **Regla:** browser solo avisando antes, visible y con todo el media muted (ver Verificación §4).
 - **2026-10-09 — `log()` indefinido detrás de `LOG_PROXY_HEADERS`.** Con el flag en `1`, crear una sala daba 500 por `ReferenceError`; type stripping no lo detectó y ningún test activaba el flag (`fbdd689`). **Regla:** todo flag de config tiene un test que lo enciende; los loggers se inyectan, no se referencian globales; `npm run typecheck` en CI.
 - **2026-10-09 — Worktrees de agentes commiteados como gitlinks.** `git add -A` sumó `.claude/worktrees/*` como submódulos rotos. **Regla:** `.claude/worktrees/` en `.gitignore` y `git status` antes de cada `git add`.
 - **2026-10-09 — Jugadores tardíos rompían matches pasados.** El ranking se recalculaba con la cantidad actual de jugadores, así que alguien que entraba después convertía un match en no-match (`3448ecc`). **Regla:** los resultados de una carta se congelan al cerrarse (`results` en el snapshot); el frontend nunca recalcula desde `votes`.
