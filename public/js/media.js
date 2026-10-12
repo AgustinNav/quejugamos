@@ -3,7 +3,7 @@
 import { $, esc } from './dom.js';
 import { getDetails } from './catalog.js';
 import { attachMovie, playQuietly } from './player.js';
-import { applyAudio, audioState, onAudioChange, setVolume, stepVolume, toggleMute as toggleAudioMute, volumeSupported } from './audio.js';
+import { applyAudio, audioState, onAudioChange, setVolume, stepVolume, toggleMute as toggleAudioMute, volumeAdjustable } from './audio.js';
 import { bindGallery, closeGallery, galleryItems, openGallery } from './gallery.js';
 
 // The card strip stays short; the full set lives in the gallery.
@@ -12,6 +12,7 @@ const CARD_SHOTS = 4;
 let player = null;
 let currentGame = null;
 let selectedIndex = 0; // gallery index of what the card shows, so the gallery opens there
+let hasTrailer = false;
 
 export function stopVideo() {
   player?.destroy();
@@ -60,9 +61,9 @@ function markSelected() {
 }
 
 function renderControls(items) {
-  const hasTrailer = items.some((item) => item.kind === 'movie');
+  hasTrailer = items.some((item) => item.kind === 'movie');
   $('muteBtn').hidden = !hasTrailer;
-  $('volumeSlider').hidden = !hasTrailer || !volumeSupported;
+  $('volumeSlider').hidden = !hasTrailer || !volumeAdjustable();
   $('galleryBtn').hidden = items.length === 0;
 }
 
@@ -99,14 +100,15 @@ export const toggleMute = toggleAudioMute;
 export const volumeUp = () => stepVolume(1);
 export const volumeDown = () => stepVolume(-1);
 
-function renderAudio({ muted, volume }) {
+function renderAudio({ muted, volume, adjustable }) {
   const percent = Math.round(volume * 100);
   const button = $('muteBtn');
   button.textContent = muted ? '🔇' : volume < 0.5 ? '🔉' : '🔊';
   button.setAttribute('aria-label', muted ? 'Activar sonido del trailer' : 'Silenciar trailer');
   const slider = $('volumeSlider');
   slider.value = String(muted ? 0 : percent);
-  slider.setAttribute('aria-valuetext', muted ? 'Silenciado' : `${percent} %`);
+  slider.setAttribute('aria-valuetext', muted ? 'Silenciado' : `Volumen ${percent}%`);
+  slider.hidden = !hasTrailer || !adjustable; // Web Audio can fail late (iOS): then mute-only
   applyAudio($('video'));
 }
 
@@ -133,6 +135,8 @@ export function bindMedia() {
   });
   $('muteBtn').addEventListener('click', toggleAudioMute);
   $('volumeSlider').addEventListener('input', (e) => setVolume(Number(e.target.value) / 100));
+  // iOS may pause a video unmuted mid-drag (not a "gesture" yet); the release is one, so resume there.
+  $('volumeSlider').addEventListener('change', () => { if (player && $('video').paused) playQuietly($('video')); });
   $('galleryBtn').addEventListener('click', openCardGallery);
   // Dragging the slider must not drag (and vote) the card underneath.
   $('mediaActions').addEventListener('pointerdown', (e) => e.stopPropagation());

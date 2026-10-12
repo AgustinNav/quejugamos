@@ -371,8 +371,11 @@ body.is-phone .toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
   width: 120px; min-height: 44px; padding: 0 12px; border-radius: 999px; cursor: pointer;
   background: rgba(0,0,0,.6); accent-color: var(--accent);
 }
-/* Phones keep only mute: the hardware buttons set the level (and iOS ignores video.volume). */
-body.is-phone .volume-slider { display: none !important; }
+/* Phones get the slider too (iOS through Web Audio, see audio.js): longer track and a 44px
+   hit area so a thumb can grab it. Horizontal drags here are the slider's, never the card's. */
+body.is-phone .volume-slider { width: 140px; min-height: 48px; touch-action: none; }
+.gallery-volume { flex: none; width: 140px; }
+@media (max-width: 600px) { .gallery-volume { width: 96px; } }
 body.gallery-open { overflow: hidden; }
 
 .gallery {
