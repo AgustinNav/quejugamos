@@ -38,6 +38,9 @@ const MIME = {
 };
 
 const rooms = new Map();
+// Single-use SSE tickets, same rules as src/tickets.ts: 30 s, bound to (room, player).
+const tickets = new Map();
+const TICKET_TTL_MS = 30_000;
 const steamCache = new Map();
 const ALLOWED_APP_IDS = new Set(GAMES.filter((g) => g.steamId).map((g) => String(g.steamId)));
 
@@ -97,6 +100,14 @@ function snapshot(room) {
 function ownVote(room, player) {
   const gameId = openCardId(room);
   return { playerId: player.id, gameId, vote: (gameId && room.votes[gameId]?.[player.id]) || null };
+}
+
+// Same privacy rule as the real server: names, votes, results and deck only for members.
+function view(req, room) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const member = token && (token === room.hostToken || room.players.some((p) => p.token === token));
+  if (member) return snapshot(room);
+  return { code: room.code, phase: room.phase, playerCount: room.players.length, maxPlayers: MAX_PLAYERS };
 }
 
 function getRoom(code) {
@@ -330,7 +341,34 @@ async function undo(req, res, room) {
   sendJson(res, 200, snapshot(room));
 }
 
+async function streamTicket(req, res, room) {
+  await readJson(req);
+  const player = room.hostToken === String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+    ? room.players.find((p) => p.isHost)
+    : auth(req, room);
+  const ticket = crypto.randomBytes(16).toString('base64url');
+  tickets.set(ticket, { code: room.code, playerId: player.id, expiresAt: Date.now() + TICKET_TTL_MS });
+  sendJson(res, 200, { ticket });
+}
+
+function consumeTicket(req, room) {
+  const ticket = new URL(req.url, 'http://localhost').searchParams.get('ticket') || '';
+  const entry = tickets.get(ticket);
+  tickets.delete(ticket);
+  const ok = entry && entry.code === room.code && entry.expiresAt > Date.now() && room.players.some((p) => p.id === entry.playerId);
+  if (!ok) throw new HttpError(401, 'unauthorized', 'Ticket inválido, vencido o ya usado');
+}
+
+async function closeRoom(req, res, room) {
+  await readJson(req);
+  auth(req, room, { host: true });
+  for (const client of room.clients) client.end('event: closed\ndata: {}\n\n');
+  rooms.delete(room.code);
+  sendJson(res, 200, { closed: true });
+}
+
 function events(req, res, room) {
+  consumeTicket(req, room);
   if (req.method === 'HEAD') return void res.writeHead(200, { 'Content-Type': 'text/event-stream' }).end();
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write(`event: state\ndata: ${JSON.stringify(snapshot(room))}\n\n`);
@@ -429,7 +467,7 @@ function serveStatic(res, pathname) {
 // ---------- router ----------
 
 const ROOM_ROUTES = {
-  'GET ': (req, res, room) => sendJson(res, 200, snapshot(room)),
+  'GET ': (req, res, room) => sendJson(res, 200, view(req, room)),
   'POST /join': join,
   'POST /start': start,
   'POST /vote': vote,
@@ -438,6 +476,8 @@ const ROOM_ROUTES = {
   'POST /skip': skip,
   'POST /kick': kick,
   'GET /me': me,
+  'POST /close': closeRoom,
+  'POST /stream-ticket': streamTicket,
   'GET /events': events,
   'HEAD /events': events,
 };
@@ -450,7 +490,7 @@ async function route(req, res, pathname) {
   if (pathname === '/healthz') return sendJson(res, 200, { ok: true });
   const mock = pathname.match(/^\/__mock\/rooms\/([^/]+)\/(bots|expire)$/);
   if (mock && req.method === 'POST') return mock[2] === 'bots' ? addBots(req, res, getRoom(mock[1])) : expire(res, getRoom(mock[1]));
-  const roomMatch = pathname.match(/^\/api\/rooms\/([^/]+)(\/[a-z]+)?$/);
+  const roomMatch = pathname.match(/^\/api\/rooms\/([^/]+)(\/[a-z-]+)?$/);
   if (roomMatch) {
     const handler = ROOM_ROUTES[`${req.method} ${roomMatch[2] || ''}`];
     if (!handler) throw new HttpError(405, 'method_not_allowed', 'Método no permitido');
