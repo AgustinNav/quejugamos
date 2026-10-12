@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
-import { api, openSse, startTestServer } from './helpers.ts';
+import { api, eventsPath, openRoomSse, startTestServer } from './helpers.ts';
 import type { SseClient, TestServer } from './helpers.ts';
 
 let srv: TestServer;
@@ -63,18 +63,18 @@ describe('SSE caps (H1)', () => {
     const ip = nextIp();
     const open = [];
     for (let i = 0; i < 3; i += 1) {
-      const s = await openSseFrom(`/api/rooms/${room.code}/events`, ip);
+      const s = await openSseFrom(await eventsPath(base, room.code, room.hostToken), ip);
       assert.equal(s.status, 200);
       open.push(s);
     }
-    const over = await openSseFrom(`/api/rooms/${room.code}/events`, ip);
+    const over = await openSseFrom(await eventsPath(base, room.code, room.hostToken), ip);
     assert.equal(over.status, 503);
     assert.equal(JSON.parse(await over.body).error, 'capacity');
-    assert.equal((await openSseFrom(`/api/rooms/${room.code}/events`, nextIp())).status, 200, 'other IPs unaffected');
+    assert.equal((await openSseFrom(await eventsPath(base, room.code, room.hostToken), nextIp())).status, 200, 'other IPs unaffected');
 
     open[0].req.destroy();
     for (let i = 0; i < 50 && srv.hub.connectionsFrom(ip) > 2; i += 1) await new Promise((r) => setTimeout(r, 10));
-    const again = await openSseFrom(`/api/rooms/${room.code}/events`, ip);
+    const again = await openSseFrom(await eventsPath(base, room.code, room.hostToken), ip);
     assert.equal(again.status, 200);
     for (const s of [...open, again]) s.req.destroy();
   });
@@ -83,12 +83,13 @@ describe('SSE caps (H1)', () => {
     const room = await createRoom();
     const socket = net.connect(srv.port, '127.0.0.1');
     await new Promise<void>((r) => socket.once('connect', () => r()));
-    socket.write(`GET /api/rooms/${room.code}/events HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: ${nextIp()}\r\n\r\n`);
+    const path = await eventsPath(base, room.code, room.hostToken);
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: ${nextIp()}\r\n\r\n`);
     socket.pause(); // never read: the kernel buffers fill, then Node's userland buffer grows
     for (let i = 0; i < 50 && srv.hub.connectionCount(room.code) === 0; i += 1) await new Promise((r) => setTimeout(r, 10));
     assert.equal(srv.hub.connectionCount(room.code), 1);
 
-    const snapshot = { ...(await api(base, 'GET', `/api/rooms/${room.code}`)).body, padding: 'x'.repeat(1 << 20) };
+    const snapshot = { ...(await api(base, 'GET', `/api/rooms/${room.code}`, undefined, room.hostToken)).body, padding: 'x'.repeat(1 << 20) };
     for (let i = 0; i < 40 && srv.hub.connectionCount(room.code) > 0; i += 1) {
       srv.hub.broadcast(room.code, snapshot);
       await new Promise((r) => setTimeout(r, 5));
@@ -128,7 +129,7 @@ describe('room code guessing (L4)', () => {
 describe('slowloris (M3)', () => {
   test('SSE stays open longer than requestTimeout', async () => {
     const room = await createRoom();
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
     await new Promise((r) => setTimeout(r, 1200)); // 4x the 300 ms requestTimeout

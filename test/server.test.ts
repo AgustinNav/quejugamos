@@ -1,7 +1,7 @@
 import { after, afterEach, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { api, openSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
+import { api, eventsPath, openRoomSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
 import type { SseClient, TestServer } from './helpers.ts';
 import { GAMES } from '../public/games.js';
 
@@ -61,7 +61,7 @@ describe('full flow', () => {
     assert.equal(ana.status, 201);
     assert.deepEqual(Object.keys(ana.body).sort(), ['playerId', 'playerToken']);
 
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.playerToken);
     sseClients.push(sse);
     assert.equal(sse.status, 200);
     assert.match(String(sse.headers['content-type']), /^text\/event-stream/);
@@ -91,7 +91,7 @@ describe('full flow', () => {
     assert.deepEqual(pushed, v2Snapshot);
     assert.ok(!event.data.includes(room.hostToken) && !event.data.includes(ana.body.playerToken));
 
-    const snap = await api(base, 'GET', `/api/rooms/${room.code}`);
+    const snap = await api(base, 'GET', `/api/rooms/${room.code}`, undefined, ana.body.playerToken);
     assert.deepEqual(snap.body, v2Snapshot);
 
     const next = await api(base, 'POST', `/api/rooms/${room.code}/next`, {}, room.hostToken);
@@ -154,7 +154,7 @@ describe('full flow', () => {
     await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
     await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.playerToken);
 
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
 
@@ -183,7 +183,7 @@ describe('full flow', () => {
     const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
     const first = started.body.deck[0];
     await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
 
@@ -229,18 +229,18 @@ describe('full flow', () => {
     assert.equal(log.excludedGames, 3);
   });
 
-  test('open-card votes: GET and SSE without a token only show who voted; /me returns your own vote', async () => {
+  test('open-card votes: member GET and SSE only show who voted; /me returns your own vote', async () => {
     const room = await createRoom();
     const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
     const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
     const first = started.body.deck[0];
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     const voted = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'nope' }, ana.playerToken);
     assert.equal(voted.body.myVote, 'nope');
 
     const pushed = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === voted.body.version);
-    const snap = await api(base, 'GET', `/api/rooms/${room.code}`);
+    const snap = await api(base, 'GET', `/api/rooms/${room.code}`, undefined, room.hostToken);
     for (const body of [snap.body, JSON.parse(pushed.data)]) {
       assert.deepEqual(body.votes, {});
       assert.deepEqual(body.currentVoters, [ana.playerId]);
@@ -283,7 +283,8 @@ describe('full flow', () => {
 
   test('HEAD on events answers the headers and ends without holding a stream', async () => {
     const room = await createRoom();
-    const { status, ended } = await headRequest(srv.port, `/api/rooms/${room.code}/events`);
+    assert.equal((await headRequest(srv.port, `/api/rooms/${room.code}/events`)).status, 401, 'HEAD needs a ticket too');
+    const { status, ended } = await headRequest(srv.port, await eventsPath(base, room.code, room.hostToken));
     assert.equal(status, 200);
     assert.ok(ended, 'HEAD response did not end');
     assert.equal(srv.hub.connectionCount(room.code), 0);
@@ -292,7 +293,7 @@ describe('full flow', () => {
 
   test('SSE receives closed when the room expires', async () => {
     const room = await createRoom();
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
     srv.clock.t += 3 * 60 * 60 * 1000;
@@ -308,7 +309,7 @@ describe('full flow', () => {
 describe('malformed input never kills the process', () => {
   afterEach(assertAlive);
 
-  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick', 'skip'];
+  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick', 'skip', 'close', 'stream-ticket'];
   // start accepts a bigger body (excludeGameIds), so its "too large" case has to be bigger.
   const OVERSIZED = (action: string) => (action === 'start' ? 17 * 1024 : 2048);
 

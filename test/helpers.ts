@@ -73,6 +73,18 @@ export function rawRequest(port: number, request: string): Promise<number> {
   });
 }
 
+/** Trades a member token for a single-use stream ticket and returns the events path that carries it. */
+export async function eventsPath(base: string, code: string, token: string): Promise<string> {
+  const res = await api(base, 'POST', `/api/rooms/${code}/stream-ticket`, {}, token);
+  if (res.status !== 200 || typeof res.body?.ticket !== 'string') throw new Error(`stream-ticket failed: ${res.status}`);
+  return `/api/rooms/${code}/events?ticket=${encodeURIComponent(res.body.ticket)}`;
+}
+
+/** Opens the room's SSE stream the way the frontend does: fresh ticket, then connect. */
+export async function openRoomSse(base: string, code: string, token: string): Promise<SseClient> {
+  return openSse(base + await eventsPath(base, code, token));
+}
+
 export type SseEvent = { event: string; data: string };
 export type SseClient = {
   status: number;
