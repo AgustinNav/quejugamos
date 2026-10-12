@@ -231,7 +231,11 @@ function mediaReady() {
 // ---------- gesture ----------
 
 function onPointerDown(e, canSwipe) {
-  if (drag || out || !e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (!e.isPrimary) return; // a second finger never starts or breaks a swipe
+  // A new primary pointer means the previous gesture ended without a pointerup reaching us
+  // (mouse released outside the card before the axis lock): drop it instead of locking forever.
+  if (drag) onPointerCancel({ pointerId: drag.id });
+  if (out || (e.pointerType === 'mouse' && e.button !== 0)) return;
   if (e.target.closest(NO_DRAG) || document.body.classList.contains('gallery-open') || !canSwipe()) return;
   drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, axis: null, width: 0, samples: [] };
   addSample(e);
