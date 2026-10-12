@@ -23,3 +23,9 @@ services:
         value: "1"
       - key: LOG_PROXY_HEADERS
         value: "0"
+      # Absolute origin for canonical/OG URLs, robots.txt and sitemap.xml. A custom domain later
+      # only changes this value (in the dashboard too: Blueprint sync is manual).
+      - key: PUBLIC_ORIGIN
+        value: https://quejugamos.onrender.com
+      # GOOGLE_SITE_VERIFICATION / BING_SITE_VERIFICATION: set in the dashboard when verifying the
+      # site in Search Console / Bing Webmaster Tools. Unset = no verification meta tag.

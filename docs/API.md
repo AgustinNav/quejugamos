@@ -44,7 +44,7 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
 
 | Method | Path | Auth | Body | Success | Errors |
 |---|---|---|---|---|---|
-| POST | `/api/rooms` | — | `{ "hostName": string }` | `201 { code, hostToken, playerToken, playerId }` | 400 `invalid_name`, 429 `rate_limited`, 503 `capacity` |
+| POST | `/api/rooms` | — | `{ "hostName": string, "ref"?: string \| null, "viaGuest"?: boolean }` (see **Acquisition fields**) | `201 { code, hostToken, playerToken, playerId }` | 400 `invalid_name`, 400 `invalid_body`, 429 `rate_limited`, 503 `capacity` |
 | GET | `/api/rooms/:code` | — | — | `200 Snapshot` | 404 `room_not_found`, 429 `rate_limited` |
 | POST | `/api/rooms/:code/join` | — | `{ "name": string }` | `201 { playerToken, playerId }` | 400 `invalid_name`, 404, 409 `name_taken`, 409 `room_full`, 409 `room_finished` |
 | POST | `/api/rooms/:code/start` | host | `{ "filters": { platforms: string[], maxPrice: number \| null, playerCount?: number \| null, fitsGroup?: boolean } }` (see **Start filters**) | `200 Snapshot` | 400 `invalid_filters`, 401, 403 `not_host`, 409 `already_started`, 422 `empty_deck` |
@@ -66,6 +66,14 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
 - "One client" = its IP; for IPv6, its /64 prefix (an IPv4-mapped `::ffff:a.b.c.d` counts as the IPv4).
 - `400 bad_request`: malformed URL, NUL byte in the path, invalid `Host`.
 - `408` and connection closed: request headers + body not fully received within 10 s.
+
+## Acquisition fields (`POST /api/rooms`)
+
+Measurement only: they never change the response, are not stored in the room and are never echoed. The server writes them to the `room_created` log line (`ref`, `viaGuest`), which is the durable record (`scripts/metrics-from-logs.mjs` aggregates it per UTC day). Both are validated **before** the room is created, so a rejected request does not consume the per-client room quota.
+
+- `ref`: traffic source, mapped to a closed list. Exact, case-sensitive match against `tt, ig, yt, x, rd, dc, twitch, wa, gh, qr, yo` → logged as is; any other string (including `""`) → `other`; absent or `null` → `direct`; any non-string → `400 invalid_body`.
+- `viaGuest`: `true` when this browser previously joined someone else's room as a player (guest → host loop). Absent → `false`; anything other than a boolean → `400 invalid_body`.
+- Client side: `?ref=<value>` on any page is lowercased, trimmed, cut to 32 chars, stored in `sessionStorage['quejugamos:ref']` and removed from the URL with `history.replaceState` (shared links don't carry it). A successful `join` sets `localStorage['quejugamos:wasGuest'] = '1'`; the client sends `viaGuest: true` only when that flag is set.
 
 ## Start filters
 
@@ -116,6 +124,13 @@ Clients must tolerate a `stale: true` response from an older cache that has only
 - Caps: 50 streams per room, 20 per client, 2000 per server. Over a cap: `503 capacity` (JSON, no stream).
 - A client that stops reading (more than 64 KB pending) is disconnected; `EventSource` reconnects and gets a fresh snapshot.
 - The client uses the native `EventSource` (automatic reconnection).
+
+## SEO and crawler endpoints
+
+- `GET /robots.txt` → `200 text/plain; charset=utf-8`: `User-agent: *`, `Allow: /`, `Sitemap: {PUBLIC_ORIGIN}/sitemap.xml`. Nothing is disallowed on purpose: crawlers must be able to fetch `/r/*` to see its `noindex`.
+- `GET /sitemap.xml` → `200 application/xml; charset=utf-8` with a single URL: `{PUBLIC_ORIGIN}/`.
+- Every response under `/r/*` and `/api/*` carries `X-Robots-Tag: noindex`.
+- `index.html` (served for `/`, `/index.html` and `/r/:code`) is rendered at serve time: `canonical`, `og:url`, `og:image`, `twitter:image` and the JSON-LD `url` use the absolute `PUBLIC_ORIGIN` (never the request's `Host`), and the `google-site-verification` / `msvalidate.01` meta tags appear only when their env vars are set and valid.
 
 ## Frontend routes (the server serves `public/index.html` for these)
 
