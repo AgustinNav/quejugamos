@@ -48,6 +48,8 @@ Tiene que responder `{"ok":true}`. Después probalo en serio: creá una sala en 
 
 ## 4. Calibrar el rate limit (una sola vez, importante)
 
+> **Hecho el 2026-10-12: el valor correcto en Render es `TRUSTED_PROXY_HOPS=3`.** Formato observado: `X-Forwarded-For: <cliente>, <IP de Cloudflare>, <IP interna 10.x de Render>`. Con un `X-Forwarded-For: 6.6.6.6` falsificado, la tercera entrada desde la derecha siguió siendo la IP real. Repetí este procedimiento solo si Render cambia su red o si el rate limit deja de frenar.
+
 El rate limit identifica a cada usuario por IP usando `X-Forwarded-For`. Render no documenta cuántos proxies agregan entradas a ese header. Si el número está mal, pasa una de dos cosas:
 
 - **Muy bajo:** todos los usuarios comparten una "IP" y el límite de 5 salas por hora pasa a ser **global**. El lanzamiento se rompe.
