@@ -16,6 +16,7 @@ import { DEFAULT_LIMITS, RoomError, RoomStore } from './rooms.ts';
 import type { RoomLimits } from './rooms.ts';
 import * as routes from './routes.ts';
 import type { ApiDeps, Handler, RouteContext } from './routes.ts';
+import { createIndexRenderer, robotsTxt, sitemapXml } from './seo.ts';
 import { SseHub } from './sse.ts';
 import type { SseHubOptions } from './sse.ts';
 import { SteamClient } from './steam.ts';
@@ -62,6 +63,8 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_CONNECTIONS = 3000;
 const VALID_HOST = /^(?:[A-Za-z0-9.-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
 const ROOM_CODE = /^[A-Za-z0-9]{6}$/;
+// Rooms are ephemeral and the API is not content: keep both out of search results (see seo.ts).
+const NOINDEX_PATH = /^\/(?:api|r)\//;
 
 type Route = { method: 'GET' | 'POST'; pattern: RegExp; handler: Handler };
 
@@ -130,12 +133,34 @@ function serveFile(req: IncomingMessage, res: ServerResponse, filePath: string):
   });
 }
 
-function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string, publicDir: string): void {
+type IndexRenderer = () => Promise<string>;
+
+async function serveIndex(req: IncomingMessage, res: ServerResponse, renderIndex: IndexRenderer): Promise<void> {
+  let html: string;
+  try {
+    html = await renderIndex();
+  } catch {
+    return void res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
+  }
+  res.writeHead(200, { 'Content-Type': MIME['.html'] });
+  res.end(req.method === 'HEAD' ? undefined : html);
+}
+
+function serveText(req: IncomingMessage, res: ServerResponse, contentType: string, body: string): void {
+  res.writeHead(200, { 'Content-Type': contentType });
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+
+function serveStatic(
+  req: IncomingMessage, res: ServerResponse, pathname: string, publicDir: string, renderIndex: IndexRenderer,
+): Promise<void> | void {
   // SPA fallback: room links are rendered client-side.
   const isRoomPage = /^\/r\/[^/]+\/?$/.test(pathname);
   const decoded = pathname === '/' || isRoomPage ? '/index.html' : safeDecode(pathname);
   // fs throws synchronously on a NUL byte in the path, which would surface as a 500.
   if (decoded === null || decoded.includes('\0')) return sendError(res, 400, 'bad_request', 'Malformed URL');
+  // index.html carries placeholders (public origin, verification tags): never serve it raw.
+  if (decoded === '/index.html') return serveIndex(req, res, renderIndex);
   const filePath = path.normalize(path.join(publicDir, decoded.replace(/^\/+/, '')));
   // Trailing separator so a sibling like "public-secret/" can't pass the prefix check.
   if (!filePath.startsWith(publicDir + path.sep)) {
@@ -208,6 +233,7 @@ function arrivedOverHttps(req: IncomingMessage, trustedProxyHops: number): boole
 function createHandler(deps: ApiDeps, config: AppConfig) {
   const limiter = createRateLimiter(API_RATE_WINDOW_MS, API_RATE_MAX);
   const roomMisses = createRateLimiter(API_RATE_WINDOW_MS, ROOM_MISS_MAX);
+  const renderIndex = createIndexRenderer(path.join(config.publicDir, 'index.html'), config);
   setInterval(() => { limiter.prune(); roomMisses.prune(); }, API_RATE_WINDOW_MS).unref();
   return async (req: IncomingMessage, res: ServerResponse) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
@@ -217,6 +243,7 @@ function createHandler(deps: ApiDeps, config: AppConfig) {
     const pathname = parsePathname(req.url);
     if (pathname === null) return sendError(res, 400, 'bad_request', 'Malformed URL');
     if (pathname === '/healthz') return sendJson(res, 200, { ok: true });
+    if (NOINDEX_PATH.test(pathname)) res.setHeader('X-Robots-Tag', 'noindex');
     if (pathname.startsWith('/api/')) {
       const resolvedIp = clientIp(req, config.trustedProxyHops);
       const ip = rateLimitKey(resolvedIp);
@@ -230,13 +257,16 @@ function createHandler(deps: ApiDeps, config: AppConfig) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return void res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' }).end('Method not allowed');
     }
-    serveStatic(req, res, pathname, config.publicDir);
+    if (pathname === '/robots.txt') return serveText(req, res, 'text/plain; charset=utf-8', robotsTxt(config.publicOrigin));
+    if (pathname === '/sitemap.xml') return serveText(req, res, 'application/xml; charset=utf-8', sitemapXml(config.publicOrigin));
+    return serveStatic(req, res, pathname, config.publicDir, renderIndex);
   };
 }
 
 export function createApp(options: AppOptions = {}): App {
   const config = { ...loadConfig(), ...options.config };
   const log = options.log ?? createLogger();
+  for (const reason of config.warnings) log('config_invalid', { reason }, 'WARNING');
   const deps = buildDeps(config, options, log);
   const handle = createHandler(deps, config);
   const requestTimeout = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;

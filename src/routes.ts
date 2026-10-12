@@ -1,5 +1,6 @@
 // API handlers. Thin: parse input, call the domain, broadcast, log, respond.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { normalizeRef, parseViaGuest } from './acquisition.ts';
 import { buildDeck, parseExcludeGameIds, parseFilters } from './deck.ts';
 import type { CatalogGame } from './deck.ts';
 import { bearerToken, readJsonBody, sendError, sendJson } from './http.ts';
@@ -45,8 +46,11 @@ function publish(deps: ApiDeps, before: Snapshot, after: Snapshot): void {
 
 export const createRoom: Handler = async (deps, { req, res, ip }) => {
   const body = await readJsonBody(req);
+  // Validated before creating anything: a bad field must not consume the per-client room quota.
+  const ref = normalizeRef(field(body, 'ref'));
+  const viaGuest = parseViaGuest(field(body, 'viaGuest'));
   const created = deps.store.create(field(body, 'hostName'), ip);
-  deps.log('room_created', { roomCode: created.code, liveRooms: deps.store.size });
+  deps.log('room_created', { roomCode: created.code, liveRooms: deps.store.size, ref, viaGuest });
   sendJson(res, 201, created);
 };
 

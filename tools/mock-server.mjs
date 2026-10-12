@@ -16,6 +16,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT) || 3100;
 const HOST = process.env.HOST || '127.0.0.1';
+const ORIGIN = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const MAX_PLAYERS = 12;
 const PING_MS = 25_000;
@@ -218,8 +219,19 @@ function botVote(room, bot, gameId) {
 
 // ---------- handlers ----------
 
+const REF_SOURCES = new Set(['tt', 'ig', 'yt', 'x', 'rd', 'dc', 'twitch', 'wa', 'gh', 'qr', 'yo']);
+
+/** Same rules as src/acquisition.ts; the mock only prints the result. */
+function attribution({ ref, viaGuest }) {
+  if (ref !== undefined && ref !== null && typeof ref !== 'string') throw new HttpError(400, 'invalid_body', 'ref must be a string');
+  if (viaGuest !== undefined && typeof viaGuest !== 'boolean') throw new HttpError(400, 'invalid_body', 'viaGuest must be a boolean');
+  return { ref: ref == null ? 'direct' : REF_SOURCES.has(ref) ? ref : 'other', viaGuest: viaGuest ?? false };
+}
+
 async function createRoom(req, res) {
-  const { hostName } = await readJson(req);
+  const body = await readJson(req);
+  const { hostName } = body;
+  const source = attribution(body);
   const name = validName(hostName);
   let code = newCode();
   while (rooms.has(code)) code = newCode();
@@ -229,6 +241,7 @@ async function createRoom(req, res) {
     votes: {}, lastResult: null, history: [], version: 1, clients: new Set(), botTimers: new Set(),
   };
   rooms.set(code, room);
+  console.log(`[mock] room_created ${code} ref=${source.ref} viaGuest=${source.viaGuest}`);
   sendJson(res, 201, { code, hostToken: room.hostToken, playerToken: host.token, playerId: host.id });
 }
 
@@ -437,7 +450,8 @@ function serveStatic(res, pathname) {
   fs.readFile(filePath, (err, content) => {
     if (err) return res.writeHead(404).end('Not found');
     res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
-    res.end(content);
+    // Like src/seo.ts, with the mock's own origin and no verification tags.
+    res.end(rel === 'index.html' ? String(content).replaceAll('__PUBLIC_ORIGIN__', ORIGIN).replace('<!--__SITE_VERIFICATION__-->', '') : content);
   });
 }
 
@@ -473,6 +487,13 @@ async function route(req, res, pathname) {
     return handler(req, res, getRoom(roomMatch[1]));
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'method_not_allowed', 'Método no permitido');
+  if (pathname === '/robots.txt') {
+    return res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end(`User-agent: *\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+  }
+  if (pathname === '/sitemap.xml') {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${ORIGIN}/</loc></url>\n</urlset>\n`;
+    return res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' }).end(xml);
+  }
   serveStatic(res, pathname);
 }
 
@@ -481,6 +502,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   try {
     const { pathname } = new URL(req.url, 'http://localhost');
+    if (/^\/(?:api|r)\//.test(pathname)) res.setHeader('X-Robots-Tag', 'noindex');
     await route(req, res, pathname);
   } catch (err) {
     if (!(err instanceof HttpError)) console.error('[mock]', err);

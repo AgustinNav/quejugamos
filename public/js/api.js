@@ -33,7 +33,7 @@ function fallbackCode(status) {
 const roomPath = (code, suffix = '') => `/api/rooms/${encodeURIComponent(code)}${suffix}`;
 
 export const api = {
-  createRoom: (hostName) => request('POST', '/api/rooms', { body: { hostName } }),
+  createRoom: (hostName, attribution = {}) => request('POST', '/api/rooms', { body: { ...attribution, hostName } }),
   getRoom: (code) => request('GET', roomPath(code)),
   join: (code, name) => request('POST', roomPath(code, '/join'), { body: { name } }),
   start: (code, token, filters) => request('POST', roomPath(code, '/start'), { body: { filters }, token }),

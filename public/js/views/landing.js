@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { saveSession } from '../store.js';
 import { extractCode } from '../code.js';
 import { errorMessage } from '../errors.js';
+import { attributionFields } from '../attribution.js';
 
 export function showLanding() {
   showScreen('landingScreen');
@@ -19,7 +20,7 @@ async function createRoom(navigate) {
   }
   $('createBtn').disabled = true;
   try {
-    const { code, hostToken, playerToken, playerId } = await api.createRoom(hostName);
+    const { code, hostToken, playerToken, playerId } = await api.createRoom(hostName, attributionFields());
     saveSession(code, { hostToken, playerToken, playerId });
     navigate(`/r/${code}`);
   } catch (err) {
