@@ -7,13 +7,15 @@ import { currentGameId, gameName } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
 import { bindPlayedHint, excludedGameIds } from './played.js';
 import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
-import { bindSwipe } from './swipe.js';
+import { bindSwipe, isCardOut, returnCard } from './swipe.js';
+import { closesCard } from './gesture.js';
 
 // The UI was behind the server (e.g. the SSE stream died while the phone was locked).
 const STALE_STATE_ERRORS = new Set(['not_current_game', 'not_voting']);
 
+// isCardOut: the own swipe threw the card and its vote is still in flight.
 function canVote(room) {
-  return Boolean(room && !room.busy && room.session && room.state?.phase === 'voting');
+  return Boolean(room && !room.busy && room.session && room.state?.phase === 'voting' && !isCardOut());
 }
 
 async function handleActionError(room, err) {
@@ -46,7 +48,20 @@ export async function castVote(vote) {
     room.pendingVote = null;
     renderPhase(room);
     handleActionError(room, err);
+  } finally {
+    // A thrown card whose vote did not close it (error, or someone joined meanwhile) comes back.
+    // When it did close, the room's close animation is running (busy) and owns the card.
+    if (!room.busy && !room.disposed) returnCard();
   }
+}
+
+// Swipe release: votes, and tells the card to leave only if this vote is the last one missing.
+function swipeVote(vote) {
+  const room = activeRoom();
+  if (!canVote(room) || myVote(room) === vote) return 'stay';
+  const leaves = closesCard(room.state, room.session.playerId);
+  castVote(vote);
+  return leaves ? 'leave' : 'stay';
 }
 
 async function hostAction(call) {
@@ -143,5 +158,5 @@ export function bindActions() {
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);
   document.addEventListener('keydown', onKeydown);
-  bindSwipe((vote) => castVote(vote), () => canVote(activeRoom()));
+  bindSwipe({ onSwipe: swipeVote, canSwipe: () => canVote(activeRoom()) });
 }

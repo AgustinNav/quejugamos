@@ -3,6 +3,7 @@ import { $, esc, showScreen, announce, kickButton } from '../dom.js';
 import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks } from '../catalog.js';
 import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
+import { renderUnder } from '../stack.js';
 
 let renderedGameId = null;
 let matchTimer = null;
@@ -39,8 +40,16 @@ function showGame(id, state) {
       renderMedia(game, { force: true });
     }
   });
-  const nextId = state.deck[state.index + 1];
-  if (nextId) loadDetails(nextId);
+  renderNext(id, state.deck[state.index + 1]);
+}
+
+// The card underneath previews the next game; it repaints once that game's Steam cover arrives.
+function renderNext(id, nextId) {
+  renderUnder(nextId);
+  if (!nextId) return;
+  loadDetails(nextId).then((details) => {
+    if (details && renderedGameId === id) renderUnder(nextId, { force: true });
+  });
 }
 
 function renderInfo(game) {

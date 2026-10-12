@@ -4,7 +4,7 @@ import { api, openEvents } from './api.js';
 import { loadSession, saveSession, clearSession } from './store.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
-import { flyOut, playedOut, resetCard } from './swipe.js';
+import { flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
 import { syncPlayed } from './played.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
@@ -44,6 +44,7 @@ function disposeRoom(room) {
 function leaveRoom(room) {
   disposeRoom(room);
   resetMedia();
+  resetCard();
   forgetRenderedGame();
   setConnBadge(false);
   $('roomBadge').hidden = true;
@@ -227,25 +228,36 @@ function render(room, prev) {
   renderPhase(room);
 }
 
+// The card leaves (thrown, or shrunk if skipped as played), the next game is painted into it while
+// hidden over the identical card underneath, then it fades in. Snapshots arriving meanwhile are
+// kept (room.busy) and rendered at the end.
 async function animateClose(room) {
   room.busy = true;
-  const result = room.state.lastResult;
+  await leaveCard(room.state.lastResult);
+  if (room.disposed) return void (room.busy = false);
+  prepareNextCard();
+  paint(room);
+  await revealNextCard();
+  room.busy = false;
+  if (!room.disposed) renderPhase(room);
+}
+
+function leaveCard(result) {
   if (result.played) {
     // Skipped as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
     toast(`«${gameName(result.gameId)}» — ya lo jugaron, salteado`);
-    await playedOut();
-  } else {
-    announceResult(result);
-    await flyOut(result.likes > result.nopes ? 'right' : 'left');
+    return playedOut();
   }
-  room.busy = false;
-  if (room.disposed) return;
-  resetCard();
-  renderPhase(room); // renders the latest snapshot, even if more arrived mid-animation
+  announceResult(result);
+  return flyOut(result.likes > result.nopes ? 'right' : 'left');
 }
 
 export function renderPhase(room) {
-  if (room.busy || room.disposed || !room.state) return;
+  if (!room.busy) paint(room);
+}
+
+function paint(room) {
+  if (room.disposed || !room.state) return;
   const { phase, index, deck } = room.state;
   $('progress').hidden = phase !== 'voting';
   $('progress').textContent = `${Math.min(index + 1, deck.length)} / ${deck.length}`;

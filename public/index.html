@@ -118,6 +118,13 @@
 
   <!-- VOTING (host and phone share the DOM, the layout changes by body class) -->
   <main class="screen" id="votingScreen" hidden>
+    <!-- Card stack: the open card over a preview of the next one (stack.js), same grid cell. The
+         card keeps its original indentation so this wrapper does not touch the media markup. -->
+    <div class="card-stack">
+    <div class="card-under" id="cardUnder" aria-hidden="true" hidden>
+      <div class="under-media"><img id="underImg" alt="" draggable="false" hidden></div>
+      <p class="under-name" id="underName"></p>
+    </div>
     <article class="card" id="card" aria-label="Juego actual">
       <div class="stamp like" aria-hidden="true">LIKE</div>
       <div class="stamp nope" aria-hidden="true">NOPE</div>
@@ -132,19 +139,23 @@
         </div>
       </div>
       <div class="shots" id="shots"></div>
-    </article>
-
-    <aside class="info panel">
-      <div class="title-row">
-        <h2 id="gameName"></h2>
-        <span class="price" id="gamePrice"></span>
+      <!-- The whole card (media + info) is one draggable unit, like a physical card. -->
+      <div class="card-body">
+        <div class="title-row">
+          <h2 id="gameName"></h2>
+          <span class="price" id="gamePrice"></span>
+        </div>
+        <div class="meta" id="gameMeta"></div>
+        <div class="tags" id="gameTags"></div>
+        <p class="pitch" id="gamePitch"></p>
+        <p class="steam-desc" id="gameSteamDesc"></p>
+        <div class="links" id="gameLinks"></div>
+        <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
       </div>
-      <div class="meta" id="gameMeta"></div>
-      <div class="tags" id="gameTags"></div>
-      <p class="pitch" id="gamePitch"></p>
-      <p class="steam-desc" id="gameSteamDesc"></p>
-      <div class="links" id="gameLinks"></div>
-      <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
+    </article>
+    </div>
+
+    <aside class="side panel">
 
       <section class="voters host-only" aria-labelledby="votersTitle">
         <h3 id="votersTitle">¿Quién votó? <span class="count" id="votersCount"></span></h3>
