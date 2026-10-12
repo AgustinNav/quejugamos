@@ -2,6 +2,7 @@
 import { $, setLoading, toast } from './dom.js';
 import { api, openEvents } from './api.js';
 import { loadSession, saveSession, clearSession } from './store.js';
+import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
 import { flyOut, playedOut, resetCard } from './swipe.js';
@@ -120,6 +121,7 @@ async function joinRoom(room, name) {
     const { playerToken, playerId } = await api.join(room.code, name);
     const session = { playerToken, playerId };
     saveSession(room.code, session);
+    markGuest();
     setSession(room, session);
     setLoading(true, 'Entrando a la sala…');
     connect(room); // the first SSE event carries the full snapshot
