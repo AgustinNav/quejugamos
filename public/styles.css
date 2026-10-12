@@ -132,8 +132,6 @@ a { color: inherit; }
 .filter { margin-bottom: 18px; }
 .filter > label, .filter-label { display: block; color: var(--muted); margin-bottom: 8px; }
 .filter input[type=range] { width: 100%; accent-color: var(--accent); min-height: 32px; }
-.check { display: flex !important; gap: 10px; align-items: center; color: var(--text) !important; cursor: pointer; min-height: 44px; }
-.check input { width: 22px; height: 22px; accent-color: var(--accent); }
 .platform-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
 .toggle {
   font: inherit; cursor: pointer; padding: 10px 16px; border-radius: 999px; min-height: 44px;
@@ -336,4 +334,98 @@ body.is-phone .vote-btn { min-height: 88px; font-size: 44px; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   /* Fading is not motion: keep the match overlay readable. */
   .match-overlay.play { animation-duration: 1.8s !important; }
+}
+
+/* ===== "Ya lo jugamos" (already played) ===== */
+.stamp.played {
+  left: 50%; top: 40%; color: var(--gold); white-space: nowrap;
+  transform: translate(-50%, -50%) rotate(-8deg);
+}
+/* Stamp shows first, then the card shrinks and fades (not a LIKE/NOPE swipe). */
+.card.played-out { transition: transform .7s ease, opacity .35s ease .35s; }
+.card.played-out .stamp.played { opacity: 1; }
+.played-btn { align-self: flex-start; min-height: 48px; }
+body.is-phone .played-btn { align-self: stretch; }
+body.is-phone .stamp.played { font-size: 26px; }
+/* The skip toast lands right when people vote the next card: keep it above the fixed vote bar. */
+body.is-phone .toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
+.played-hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.link-btn {
+  font: inherit; color: var(--accent); background: none; border: none; padding: 0 6px; cursor: pointer;
+  text-decoration: underline; min-height: 48px;
+}
+.played-group { margin-top: 24px; }
+.played-group h3 { margin: 0 0 8px; font-size: 17px; }
+.played-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.played-list li {
+  padding: 6px 12px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}
+
+/* ===== MEDIA: volume slider + fullscreen gallery ===== */
+.media-actions { align-items: center; z-index: 6; }
+.gallery-btn {
+  min-height: 44px; padding: 8px 14px; font-size: 15px;
+  background: rgba(0,0,0,.6); border-color: rgba(255,255,255,.2);
+}
+.volume-slider {
+  width: 120px; min-height: 44px; padding: 0 12px; border-radius: 999px; cursor: pointer;
+  background: rgba(0,0,0,.6); accent-color: var(--accent);
+}
+/* Phones keep only mute: the hardware buttons set the level (and iOS ignores video.volume). */
+body.is-phone .volume-slider { display: none !important; }
+body.gallery-open { overflow: hidden; }
+
+.gallery {
+  position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  border: 0; background: #000; color: var(--text); overflow: hidden;
+}
+.gallery[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.gallery::backdrop { background: #000; }
+.gallery-bar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; }
+.gallery-title {
+  margin: 0; flex: 1; min-width: 0; font-size: clamp(18px, 2.4vw, 34px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gallery-count { color: var(--muted); font-size: clamp(14px, 1.6vw, 22px); white-space: nowrap; }
+.gallery-close {
+  flex: none; width: 56px; height: 56px; min-height: 56px; padding: 0; border-radius: 50%;
+  font-size: 24px; line-height: 1;
+}
+.gallery-stage { position: relative; min-height: 0; overflow: hidden; touch-action: pan-y pinch-zoom; }
+.gallery-stage video, .gallery-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.gallery-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 64px; height: 64px; border-radius: 50%; cursor: pointer;
+  font: inherit; font-size: 40px; line-height: 1; color: var(--text);
+  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.25);
+}
+.gallery-nav:hover { background: rgba(0,0,0,.8); }
+.gallery-nav.prev { left: 16px; }
+.gallery-nav.next { right: 16px; }
+.gallery-thumbs {
+  display: flex; gap: 10px; overflow-x: auto; padding: 12px 16px 16px;
+  scroll-snap-type: x proximity; scrollbar-width: thin;
+}
+.gallery-thumb {
+  position: relative; flex: none; width: clamp(110px, 11vw, 220px); aspect-ratio: 16 / 9; padding: 0;
+  border: 3px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer;
+  background: var(--panel-2); scroll-snap-align: center; opacity: .7;
+}
+.gallery-thumb:hover, .gallery-thumb[aria-current="true"] { opacity: 1; }
+.gallery-thumb[aria-current="true"] { border-color: var(--accent); }
+.gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb-badge {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 26px; color: #fff; background: rgba(0,0,0,.35); text-shadow: 0 1px 4px #000;
+}
+
+@media (max-width: 600px) {
+  .gallery-bar { padding: 8px 12px; gap: 10px; }
+  .gallery-close { width: 48px; height: 48px; min-height: 48px; }
+  .gallery-nav { width: 48px; height: 48px; font-size: 30px; }
+  .gallery-nav.prev { left: 8px; }
+  .gallery-nav.next { right: 8px; }
+  .gallery-thumbs { padding: 8px 12px 12px; gap: 8px; }
+  .gallery-thumb { width: 96px; }
 }

@@ -4,26 +4,32 @@ import { PLATFORMS } from '../catalog.js';
 import { qrDataUrl } from '../qr.js';
 import { roomUrl } from '../code.js';
 import { errorMessage } from '../errors.js';
+import { renderPlayedHint } from '../played.js';
 
 const NO_PRICE_LIMIT = 70;
 const MAX_PLAYERS = 12;
-const filters = { platforms: [...PLATFORMS], maxPrice: NO_PRICE_LIMIT, fitsGroup: true };
+// playerCount null = automatic: games where everyone in the room fits. 5 stands for "5+".
+const PLAYER_COUNT_OPTIONS = [null, 2, 3, 4, 5];
+const filters = { platforms: [...PLATFORMS], maxPrice: NO_PRICE_LIMIT, playerCount: null };
+let roomPlayers = 1;
 let qrCode = null;
 
 export function currentFilters() {
   return {
     platforms: [...filters.platforms],
     maxPrice: filters.maxPrice >= NO_PRICE_LIMIT ? null : filters.maxPrice,
-    fitsGroup: filters.fitsGroup,
+    playerCount: filters.playerCount,
   };
 }
 
 export function renderHostLobby(room) {
   const { players } = room.state;
+  roomPlayers = players.length;
   renderInvite(room.code);
   renderNameList('lobbyPlayers', players, room.session.playerId, { kickable: true });
   $('lobbyCount').textContent = `(${players.length}/${MAX_PLAYERS})`;
   renderFilters();
+  renderPlayedHint();
   showScreen('lobbyHostScreen');
 }
 
@@ -57,7 +63,21 @@ function renderFilters() {
     .join('');
   $('maxPrice').value = filters.maxPrice;
   $('maxPriceLabel').textContent = priceLabel(filters.maxPrice);
-  $('fitsGroup').checked = filters.fitsGroup;
+  renderPlayerCount();
+}
+
+function playerCountLabel(value) {
+  if (value === null) return `Automático (${roomPlayers} en la sala)`;
+  return value === 5 ? '5+' : String(value);
+}
+
+function renderPlayerCount() {
+  $('playerCountToggles').innerHTML = PLAYER_COUNT_OPTIONS
+    .map((n) => {
+      const on = filters.playerCount === n;
+      return `<button type="button" class="toggle ${on ? 'on' : ''}" data-player-count="${n ?? 'auto'}" aria-pressed="${on}">${playerCountLabel(n)}</button>`;
+    })
+    .join('');
 }
 
 function priceLabel(value) {
@@ -91,7 +111,13 @@ export function bindLobby(onStart) {
     filters.maxPrice = Number(e.target.value);
     $('maxPriceLabel').textContent = priceLabel(filters.maxPrice);
   });
-  $('fitsGroup').addEventListener('change', (e) => { filters.fitsGroup = e.target.checked; });
+  $('playerCountToggles').addEventListener('click', (e) => {
+    const value = e.target.closest('[data-player-count]')?.dataset.playerCount;
+    if (!value) return;
+    filters.playerCount = value === 'auto' ? null : Number(value);
+    renderPlayerCount();
+    $('playerCountToggles').querySelector(`[data-player-count="${value}"]`)?.focus();
+  });
   $('copyLinkBtn').addEventListener('click', copyLink);
   $('startBtn').addEventListener('click', async () => {
     if (!filters.platforms.length) return setStartError('invalid_filters');

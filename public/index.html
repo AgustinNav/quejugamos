@@ -97,10 +97,12 @@
         <input type="range" id="maxPrice" min="0" max="70" step="5" value="70">
       </div>
       <div class="filter">
-        <label class="check"><input type="checkbox" id="fitsGroup" checked> Solo juegos donde entremos todos</label>
+        <span class="filter-label" id="playerCountLabel">¿Cuántos van a jugar?</span>
+        <div class="platform-toggles" id="playerCountToggles" role="group" aria-labelledby="playerCountLabel"></div>
       </div>
       <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
       <p class="form-error" id="startError" role="alert"></p>
+      <p class="played-hint" id="playedHint" hidden><span id="playedHintText"></span> · <button class="link-btn" type="button" id="playedResetBtn">Mostrar de nuevo</button></p>
     </section>
   </main>
 
@@ -119,10 +121,13 @@
     <article class="card" id="card" aria-label="Juego actual">
       <div class="stamp like" aria-hidden="true">LIKE</div>
       <div class="stamp nope" aria-hidden="true">NOPE</div>
+      <div class="stamp played" aria-hidden="true">YA JUGADO ✅</div>
       <div class="media" id="media">
         <video id="video" playsinline muted loop></video>
         <img id="mediaImg" alt="">
-        <div class="media-actions">
+        <div class="media-actions" id="mediaActions">
+          <button class="btn gallery-btn" type="button" id="galleryBtn" title="Galería (G)" hidden>🖼 Galería</button>
+          <input class="volume-slider" type="range" id="volumeSlider" min="0" max="100" step="5" value="0" aria-label="Volumen del trailer" title="Volumen (+ / −)" hidden>
           <button class="btn round" type="button" id="muteBtn" aria-label="Activar sonido del trailer" title="Sonido (M)">🔇</button>
         </div>
       </div>
@@ -139,6 +144,7 @@
       <p class="pitch" id="gamePitch"></p>
       <p class="steam-desc" id="gameSteamDesc"></p>
       <div class="links" id="gameLinks"></div>
+      <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
 
       <section class="voters host-only" aria-labelledby="votersTitle">
         <h3 id="votersTitle">¿Quién votó? <span class="count" id="votersCount"></span></h3>
@@ -147,7 +153,7 @@
           <button class="btn ghost" type="button" id="undoBtn" title="Deshacer (Z)">↶ Deshacer</button>
           <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
         </div>
-        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido</p>
+        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
       </section>
 
       <div class="vote-bar" id="voteBar">
@@ -169,6 +175,10 @@
       </div>
       <p class="muted" id="resultsNote"></p>
       <ol class="ranking" id="ranking"></ol>
+      <section class="played-group" id="playedGroup" aria-labelledby="playedGroupTitle" hidden>
+        <h3 id="playedGroupTitle">✅ Ya jugados <span class="count">(salteados, no cuentan para el ranking)</span></h3>
+        <ul class="played-list" id="playedList"></ul>
+      </section>
     </section>
   </main>
 
@@ -194,6 +204,21 @@
     <div class="match-text">IT'S A MATCH 💘</div>
     <p id="matchGame"></p>
   </div>
+
+  <dialog class="gallery" id="gallery" aria-modal="true" aria-labelledby="galleryTitle">
+    <div class="gallery-bar">
+      <h2 class="gallery-title" id="galleryTitle"></h2>
+      <span class="gallery-count" id="galleryCount" aria-live="polite"></span>
+      <button class="btn gallery-close" type="button" id="galleryClose" aria-label="Cerrar galería" title="Cerrar (Esc)">✕</button>
+    </div>
+    <div class="gallery-stage" id="galleryStage">
+      <video id="galleryVideo" playsinline controls preload="none" hidden></video>
+      <img id="galleryImg" alt="" hidden>
+      <button class="gallery-nav prev" type="button" id="galleryPrev" aria-label="Anterior" title="Anterior (←)">‹</button>
+      <button class="gallery-nav next" type="button" id="galleryNext" aria-label="Siguiente" title="Siguiente (→)">›</button>
+    </div>
+    <div class="gallery-thumbs" id="galleryThumbs" aria-label="Trailers y capturas"></div>
+  </dialog>
 
   <div class="toast" id="toast" role="alert" hidden></div>
   <p class="sr-only" id="announcer" aria-live="assertive"></p>

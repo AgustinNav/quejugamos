@@ -52,7 +52,7 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function readJson(req) {
+function readJson(req, limit = 1024) {
   return new Promise((resolve, reject) => {
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
       return reject(new HttpError(415, 'unsupported_media_type', 'Content-Type must be application/json'));
@@ -60,7 +60,7 @@ function readJson(req) {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 1024) { reject(new HttpError(413, 'body_too_large', 'Body too large')); req.destroy(); }
+      if (raw.length > limit) { reject(new HttpError(413, 'body_too_large', 'Body too large')); req.destroy(); }
     });
     req.on('end', () => {
       try { resolve(JSON.parse(raw || '{}')); } catch { reject(new HttpError(400, 'invalid_json', 'Malformed JSON')); }
@@ -136,7 +136,9 @@ function shuffle(list) {
 function buildDeck(filters, playerCount) {
   return shuffle(GAMES.filter((g) => {
     if (!g.platforms.some((p) => filters.platforms.includes(p))) return false;
-    if (filters.fitsGroup && g.players[1] < playerCount) return false;
+    if (filters.playerCount !== null) {
+      if (g.players[0] > filters.playerCount || g.players[1] < filters.playerCount) return false;
+    } else if (filters.fitsGroup && g.players[1] < playerCount) return false;
     if (filters.maxPrice === 0 && g.priceLabel !== 'Gratis') return false;
     return true;
   }).map((g) => g.id));
@@ -145,17 +147,44 @@ function buildDeck(filters, playerCount) {
 function validFilters(filters) {
   const ok = filters && Array.isArray(filters.platforms) && filters.platforms.length > 0
     && (filters.maxPrice === null || (typeof filters.maxPrice === 'number' && filters.maxPrice >= 0))
-    && typeof filters.fitsGroup === 'boolean';
+    && validPlayerCountFields(filters);
   if (!ok) throw new HttpError(400, 'invalid_filters', 'Filtros inválidos');
-  return { platforms: filters.platforms, maxPrice: filters.maxPrice, fitsGroup: filters.fitsGroup };
+  const hasCount = Object.hasOwn(filters, 'playerCount');
+  return {
+    platforms: filters.platforms, maxPrice: filters.maxPrice,
+    fitsGroup: filters.fitsGroup ?? true, playerCount: hasCount ? filters.playerCount : null,
+  };
 }
 
-function closeCard(room) {
+// Same contract as the backend: playerCount (null or integer 1-32) makes fitsGroup optional.
+function validPlayerCountFields(filters) {
+  if (!Object.hasOwn(filters, 'playerCount')) return typeof filters.fitsGroup === 'boolean';
+  const count = filters.playerCount;
+  const countOk = count === null || (Number.isInteger(count) && count >= 1 && count <= 32);
+  return countOk && (filters.fitsGroup === undefined || typeof filters.fitsGroup === 'boolean');
+}
+
+// Same rules as the real server: excludeGameIds is optional, max 200, known catalog ids only.
+const KNOWN_IDS = new Set(GAMES.map((g) => g.id));
+function excludedIds(filters) {
+  const ids = filters?.excludeGameIds;
+  if (ids === undefined) return new Set();
+  if (!Array.isArray(ids) || ids.length > 200 || !ids.every((id) => KNOWN_IDS.has(id))) {
+    throw new HttpError(400, 'invalid_filters', 'excludeGameIds inválido');
+  }
+  return new Set(ids);
+}
+
+// skippedBy: "Ya lo jugamos" — votes discarded, never a match.
+function closeCard(room, skippedBy = null) {
   const gameId = room.deck[room.index];
+  if (skippedBy) delete room.votes[gameId];
   const votes = room.votes[gameId] || {};
   const likes = Object.values(votes).filter((v) => v === 'like').length;
   const nopes = Object.values(votes).filter((v) => v === 'nope').length;
-  room.lastResult = { gameId, likes, nopes, match: likes === room.players.length };
+  room.lastResult = skippedBy
+    ? { gameId, likes, nopes, match: false, played: true, skippedBy }
+    : { gameId, likes, nopes, match: likes === room.players.length };
   room.history.push(room.lastResult);
   room.index += 1;
   if (room.index >= room.deck.length) room.phase = 'finished';
@@ -221,11 +250,12 @@ async function join(req, res, room) {
 }
 
 async function start(req, res, room) {
-  const body = await readJson(req);
+  const body = await readJson(req, 16 * 1024);
   auth(req, room, { host: true });
   if (room.phase !== 'lobby') throw new HttpError(409, 'already_started', 'Ya empezó');
   const filters = validFilters(body.filters);
-  const deck = buildDeck(filters, room.players.length);
+  const excluded = excludedIds(body.filters);
+  const deck = buildDeck(filters, room.players.length).filter((id) => !excluded.has(id));
   if (!deck.length) throw new HttpError(422, 'empty_deck', 'Ningún juego pasa los filtros');
   Object.assign(room, { phase: 'voting', filters, deck, index: 0, votes: {}, lastResult: null, history: [] });
   changed(room);
@@ -271,6 +301,17 @@ async function next(req, res, room) {
   auth(req, room, { host: true });
   if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
   closeCard(room);
+  changed(room);
+  sendJson(res, 200, snapshot(room));
+}
+
+async function skip(req, res, room) {
+  const body = await readJson(req);
+  const player = auth(req, room);
+  if (typeof body?.gameId !== 'string' || !body.gameId || body.gameId.length > 64) throw new HttpError(400, 'invalid_game', 'Juego inválido');
+  if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
+  if (body.gameId !== room.deck[room.index]) throw new HttpError(409, 'not_current_game', 'No es la tarjeta actual');
+  closeCard(room, player.id);
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
@@ -326,21 +367,31 @@ function dropAll(res) {
 
 // ---------- steam proxy (same shape as v1 server.js) ----------
 
-function pickMovie(movies = []) {
-  const movie = movies.find((m) => m.highlight) || movies[0];
-  if (!movie) return null;
-  return { name: movie.name, poster: movie.thumbnail, hls: movie.hls_h264 || null, mp4: movie.mp4?.max || movie.mp4?.['480'] || null };
+// Mirrors src/steam.ts: highlighted trailers first, max 6 movies / 12 screenshots.
+function toMovie(m) {
+  const hls = m?.hls_h264 || null;
+  const mp4 = m?.mp4?.max || m?.mp4?.['480'] || null;
+  return hls || mp4 ? { name: String(m.name ?? ''), poster: m.thumbnail || null, hls, mp4 } : null;
+}
+
+function pickMovies(movies = []) {
+  const ordered = [...movies.filter((m) => m?.highlight), ...movies.filter((m) => !m?.highlight)];
+  return ordered.map(toMovie).filter(Boolean).slice(0, 6);
 }
 
 function toGameDetails(data) {
+  const movies = pickMovies(data.movies);
+  const shots = (data.screenshots || []).filter((s) => typeof s?.path_full === 'string').slice(0, 12);
   return {
     name: data.name,
     isFree: data.is_free,
     price: data.price_overview || null,
     shortDescription: data.short_description,
     header: data.header_image,
-    screenshots: (data.screenshots || []).slice(0, 4).map((s) => s.path_full),
-    movie: pickMovie(data.movies),
+    screenshots: shots.map((s) => s.path_full),
+    screenshotThumbs: shots.map((s) => s.path_thumbnail || s.path_full),
+    movie: movies[0] ?? null,
+    movies,
     genres: (data.genres || []).map((g) => g.description),
     categories: (data.categories || []).map((c) => c.description),
     reviews: data.recommendations?.total || null,
@@ -384,6 +435,7 @@ const ROOM_ROUTES = {
   'POST /vote': vote,
   'POST /next': next,
   'POST /undo': undo,
+  'POST /skip': skip,
   'POST /kick': kick,
   'GET /me': me,
   'GET /events': events,

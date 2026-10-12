@@ -19,6 +19,7 @@ import type { ApiDeps, Handler, RouteContext } from './routes.ts';
 import { SseHub } from './sse.ts';
 import type { SseHubOptions } from './sse.ts';
 import { SteamClient } from './steam.ts';
+import type { UpstreamQueue } from './upstream-queue.ts';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -71,6 +72,7 @@ const ROUTES: Route[] = [
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/start$/, handler: routes.startRoom },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/vote$/, handler: routes.voteRoom },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/next$/, handler: routes.nextCard },
+  { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/skip$/, handler: routes.skipCard },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/undo$/, handler: routes.undoCard },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/kick$/, handler: routes.kickPlayer },
   { method: 'GET', pattern: /^\/api\/rooms\/([^/]+)\/events$/, handler: routes.roomEvents },
@@ -87,12 +89,14 @@ export type AppOptions = {
   sse?: SseHubOptions;
   priceTimeoutMs?: number;
   requestTimeoutMs?: number;
+  steamQueue?: UpstreamQueue;
 };
 
 export type App = {
   server: http.Server;
   store: RoomStore;
   hub: SseHub;
+  steam: SteamClient;
   config: AppConfig;
   close: () => Promise<void>;
 };
@@ -107,6 +111,7 @@ function buildDeps(config: AppConfig, options: AppOptions, log: Logger): ApiDeps
   const store = new RoomStore({ now, randomInt, uuid: randomUUID, onExpire }, { ...DEFAULT_LIMITS, ...options.limits });
   const steam = new SteamClient({
     games: GAMES, country: config.country, fetchImpl: options.fetchImpl, cacheFile: config.cacheFile, now, log,
+    queue: options.steamQueue,
   });
   return {
     store, hub, steam, log, games: GAMES, platforms: PLATFORMS, randomInt, priceTimeoutMs: options.priceTimeoutMs ?? 4000,
@@ -255,7 +260,7 @@ export function createApp(options: AppOptions = {}): App {
     server.closeIdleConnections();
     setTimeout(() => server.closeAllConnections(), 2000).unref();
   });
-  return { server, store: deps.store, hub: deps.hub, config, close };
+  return { server, store: deps.store, hub: deps.hub, steam: deps.steam, config, close };
 }
 
 export type RunningServer = App & { port: number; url: string };
@@ -281,6 +286,8 @@ async function main(): Promise<void> {
   });
   const app = await startServer({ log });
   log('server_started', { url: app.url, steamCountry: app.config.country, trustedProxyHops: app.config.trustedProxyHops });
+  // Render's disk is ephemeral: every deploy/spin-up starts with an empty Steam cache.
+  app.steam.warmCache();
   const shutdown = (signal: string) => {
     log('server_stopping', { signal, sseConnections: app.hub.connectionCount() });
     setTimeout(() => process.exit(0), 8000).unref();

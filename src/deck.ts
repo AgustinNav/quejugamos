@@ -14,6 +14,7 @@ export type CatalogGame = {
 export type PriceMap = ReadonlyMap<string, number | null>;
 
 const MAX_PRICE_LIMIT = 10_000;
+const MAX_PLAYER_COUNT = 32;
 
 function invalidFilters(message: string): RoomError {
   return new RoomError(400, 'invalid_filters', message);
@@ -39,13 +40,49 @@ function parseMaxPrice(value: unknown): number | null {
   return value;
 }
 
+function parsePlayerCount(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_PLAYER_COUNT) {
+    throw invalidFilters(`playerCount must be null or an integer between 1 and ${MAX_PLAYER_COUNT}`);
+  }
+  return value;
+}
+
+/** Clients that send playerCount may omit fitsGroup (defaults to true); older clients must send it. */
+function parseFitsGroup(value: unknown, optional: boolean): boolean {
+  if (value === undefined && optional) return true;
+  if (typeof value !== 'boolean') throw invalidFilters('fitsGroup must be a boolean');
+  return value;
+}
+
 /** Validates untrusted filters input. Throws RoomError(400, invalid_filters). */
 export function parseFilters(input: unknown, knownPlatforms: readonly string[]): Filters {
   if (!isPlainObject(input)) throw invalidFilters('filters must be an object');
   const platforms = parsePlatforms(input.platforms, knownPlatforms);
   const maxPrice = parseMaxPrice(input.maxPrice);
-  if (typeof input.fitsGroup !== 'boolean') throw invalidFilters('fitsGroup must be a boolean');
-  return { platforms, maxPrice, fitsGroup: input.fitsGroup };
+  const hasPlayerCount = Object.hasOwn(input, 'playerCount');
+  const playerCount = hasPlayerCount ? parsePlayerCount(input.playerCount) : null;
+  const fitsGroup = parseFitsGroup(input.fitsGroup, hasPlayerCount);
+  return { platforms, maxPrice, fitsGroup, playerCount };
+}
+
+export const MAX_EXCLUDED_GAMES = 200;
+
+/**
+ * Optional `filters.excludeGameIds`: games the host already played (remembered on the host's device).
+ * Parsed apart from parseFilters because it only shapes the deck and is never stored in the room.
+ * Unknown ids are rejected (not ignored) so a client bug shows up instead of silently doing nothing.
+ */
+export function parseExcludeGameIds(filters: unknown, knownGameIds: ReadonlySet<string>): string[] {
+  const value = isPlainObject(filters) ? filters.excludeGameIds : undefined;
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_EXCLUDED_GAMES) {
+    throw invalidFilters(`excludeGameIds must be an array of at most ${MAX_EXCLUDED_GAMES} game ids`);
+  }
+  for (const id of value) {
+    if (typeof id !== 'string' || !knownGameIds.has(id)) throw invalidFilters('excludeGameIds contains an unknown game id');
+  }
+  return [...new Set(value as string[])];
 }
 
 /** Same rule as the v1 client: free games cost 0, unknown prices are null (and pass the filter). */
@@ -55,9 +92,16 @@ export function priceFromDetails(game: CatalogGame, details: { isFree?: boolean;
   return null;
 }
 
+/** An explicit playerCount wins: the game must support exactly that many. Otherwise fitsGroup uses the room size. */
+function fitsPlayers(game: CatalogGame, filters: Filters, roomPlayers: number): boolean {
+  const [min, max] = game.players;
+  if (filters.playerCount !== null) return min <= filters.playerCount && filters.playerCount <= max;
+  return !filters.fitsGroup || max >= roomPlayers;
+}
+
 export function matchesFilters(game: CatalogGame, filters: Filters, playerCount: number, prices: PriceMap): boolean {
   if (!game.platforms.some((p) => filters.platforms.includes(p))) return false;
-  if (filters.fitsGroup && game.players[1] < playerCount) return false;
+  if (!fitsPlayers(game, filters, playerCount)) return false;
   const price = prices.get(game.id) ?? null;
   return filters.maxPrice === null || price === null || price <= filters.maxPrice;
 }
@@ -78,7 +122,10 @@ export function buildDeck(
   playerCount: number,
   prices: PriceMap,
   randomInt: (maxExclusive: number) => number,
+  excluded: ReadonlySet<string> = new Set(),
 ): string[] {
-  const ids = games.filter((g) => matchesFilters(g, filters, playerCount, prices)).map((g) => g.id);
+  const ids = games
+    .filter((g) => !excluded.has(g.id) && matchesFilters(g, filters, playerCount, prices))
+    .map((g) => g.id);
   return shuffle(ids, randomInt);
 }

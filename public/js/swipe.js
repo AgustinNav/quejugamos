@@ -3,6 +3,7 @@ import { $ } from './dom.js';
 
 const SWIPE_THRESHOLD = 110;
 const FLY_OUT_MS = 380;
+const PLAYED_OUT_MS = 700;
 
 function stamps() {
   const card = $('card');
@@ -21,7 +22,7 @@ function setCardOffset(dx) {
 
 export function resetCard() {
   const card = $('card');
-  card.classList.remove('animating', 'dragging');
+  card.classList.remove('animating', 'dragging', 'played-out');
   card.style.opacity = '';
   setCardOffset(0);
 }
@@ -42,6 +43,18 @@ export function flyOut(direction) {
   card.style.transform = `translateX(${dx}px) rotate(${dx / 25}deg)`;
   card.style.opacity = '0';
   return new Promise((resolve) => setTimeout(resolve, FLY_OUT_MS));
+}
+
+// "Ya lo jugamos": the card shrinks and fades in place with its own stamp, never as LIKE/NOPE.
+export function playedOut() {
+  const card = $('card');
+  const { like, nope } = stamps();
+  like.style.opacity = '0';
+  nope.style.opacity = '0';
+  card.classList.add('played-out');
+  card.style.transform = 'scale(.85)';
+  card.style.opacity = '0';
+  return new Promise((resolve) => setTimeout(resolve, PLAYED_OUT_MS));
 }
 
 // onSwipe receives 'like' | 'nope'; canSwipe lets the caller lock the card (e.g. mid-animation).
