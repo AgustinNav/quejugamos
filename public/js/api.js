@@ -34,7 +34,8 @@ const roomPath = (code, suffix = '') => `/api/rooms/${encodeURIComponent(code)}$
 
 export const api = {
   createRoom: (hostName) => request('POST', '/api/rooms', { body: { hostName } }),
-  getRoom: (code) => request('GET', roomPath(code)),
+  // With a member token: full snapshot. Without one: public view { code, phase, playerCount, maxPlayers }.
+  getRoom: (code, token) => request('GET', roomPath(code), { token }),
   join: (code, name) => request('POST', roomPath(code, '/join'), { body: { name } }),
   start: (code, token, filters) => request('POST', roomPath(code, '/start'), { body: { filters }, token }),
   vote: (code, token, gameId, vote) => request('POST', roomPath(code, '/vote'), { body: { gameId, vote }, token }),
@@ -42,10 +43,16 @@ export const api = {
   skip: (code, token, gameId) => request('POST', roomPath(code, '/skip'), { body: { gameId }, token }),
   undo: (code, token) => request('POST', roomPath(code, '/undo'), { body: {}, token }),
   kick: (code, token, playerId) => request('POST', roomPath(code, '/kick'), { body: { playerId }, token }),
+  close: (code, token) => request('POST', roomPath(code, '/close'), { body: {}, token }),
+  streamTicket: (code, token) => request('POST', roomPath(code, '/stream-ticket'), { body: {}, token }),
   me: (code, token) => request('GET', roomPath(code, '/me'), { token }),
   steam: (appId) => request('GET', `/api/steam/${encodeURIComponent(appId)}`),
 };
 
-export function openEvents(code) {
-  return new EventSource(roomPath(code, '/events'));
+// The ticket is single-use: native EventSource auto-reconnect reuses the URL and would get 401,
+// so room.js closes the stream on error and opens a new one with a fresh ticket.
+export function openEvents(code, ticket) {
+  return new EventSource(roomPath(code, `/events?ticket=${encodeURIComponent(ticket)}`));
 }
+
+export const isMemberSnapshot = (data) => Array.isArray(data?.players);

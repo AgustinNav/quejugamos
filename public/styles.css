@@ -224,6 +224,10 @@ a { color: inherit; }
 }
 .kick-btn:hover, .kick-btn:focus-visible { color: var(--nope); border-color: currentColor; }
 .host-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+/* "Cerrar sala": host only (lobby, voting host controls, results) */
+body:not(.is-host) .close-room-btn { display: none; }
+.host-controls .close-room-btn { grid-column: 1 / -1; }
+.lobby-side .close-room-btn { margin-top: 12px; }
 .kbd-help { color: var(--muted); font-size: 13px; margin: 10px 0 0; line-height: 1.8; }
 kbd {
   font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 5px;
