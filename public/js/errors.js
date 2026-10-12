@@ -24,7 +24,7 @@ const MESSAGES = {
   unknown_game: 'No encontramos ese juego.',
   steam_unavailable: 'Steam no responde ahora: algunos datos del juego pueden faltar.',
   invalid_body: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
-  invalid_json:'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
+  invalid_json: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
   bad_request: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
   body_too_large: 'Ese texto es demasiado largo.',
   unsupported_media_type: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
