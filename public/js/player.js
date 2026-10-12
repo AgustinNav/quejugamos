@@ -1,9 +1,11 @@
 // Loads a Steam trailer into a <video>: mp4 when Steam has one, else HLS via the vendored
 // hls.js (or Safari's native HLS). Shared by the card and the gallery.
+import { prepareVideo } from './audio.js';
 
 // Returns a handle whose destroy() stops the download and frees the decoder.
 export function attachMovie(video, movie) {
   let hls = null;
+  prepareVideo(video); // before any source: crossOrigin only applies to loads that start after it
   video.poster = movie.poster || '';
   if (movie.mp4) {
     video.src = movie.mp4;
