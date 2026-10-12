@@ -1,4 +1,4 @@
-// The card underneath the open one (Tinder-style stack): the next game's cover and name, already
+// The card underneath the open one (a deck-of-cards stack): the next game's cover and name, already
 // painted, so the top card leaving never shows an empty frame. It only previews; it never votes.
 import { $ } from './dom.js';
 import { getDetails, getGame } from './catalog.js';
