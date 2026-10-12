@@ -150,8 +150,7 @@ a { color: inherit; }
   touch-action: pan-y; user-select: none; cursor: grab;
   box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
-.card.dragging { cursor: grabbing; transition: none; }
-.card.animating { transition: transform .4s ease, opacity .4s ease; }
+.card.dragging { cursor: grabbing; }
 .media { position: relative; aspect-ratio: 16 / 9; background: #000; }
 .media video, .media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .media-actions { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 8px; }
@@ -174,7 +173,7 @@ a { color: inherit; }
 .stamp.nope { right: 28px; color: var(--nope); transform: rotate(14deg); }
 .card.voted-like .stamp.like, .card.voted-nope .stamp.nope { opacity: .9; }
 
-.info { display: flex; flex-direction: column; gap: 14px; }
+.card-body, .side { display: flex; flex-direction: column; gap: 14px; }
 .title-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .title-row h2 { margin: 0; font-size: 32px; line-height: 1.1; }
 .price {
@@ -305,7 +304,9 @@ body.is-phone #votingScreen {
 }
 body.is-phone .shots, body.is-phone .host-only, body.is-phone .tags,
 body.is-phone .steam-desc, body.is-phone .pill.extra { display: none !important; }
-body.is-phone .info { padding: 16px; gap: 10px; }
+body.is-phone .card-body { padding: 16px; gap: 10px; }
+/* Phones: the side panel only holds the fixed vote bar. */
+body.is-phone .side { padding: 0; border: 0; background: none; }
 body.is-phone .title-row h2 { font-size: 24px; }
 body.is-phone .price { font-size: 16px; }
 body.is-phone .pitch { font-size: 16px; }
@@ -463,4 +464,30 @@ body.is-phone .finish-row .btn { flex: 1 1 100%; }
 #partialRanking { margin-top: 14px; }
 @media (min-width: 961px) {
   .ranking-sheet { margin: auto; border-bottom: 1px solid var(--border); border-radius: var(--radius); }
+}
+
+/* ===== CARD STACK & SWIPE (swipe.js, gesture.js, stack.js) ===== */
+/* Open card and next-card preview share one grid cell; the preview stretches to the card's height. */
+.card-stack { display: grid; min-width: 0; }
+.card-stack > .card, .card-stack > .card-under { grid-area: 1 / 1; }
+.card { z-index: 1; -webkit-user-select: none; -webkit-touch-callout: none; }
+.card img { -webkit-user-drag: none; }
+.card-body { padding: 20px 24px 24px; }
+.card.moving { will-change: transform; } /* only during a gesture/animation: a permanent layer costs memory */
+.card.dragging .stamp { transition: none; } /* stamps track the finger, no lag */
+.card.fading { transition: opacity .16s ease-out; }
+.card-under {
+  position: relative; z-index: 0; border-radius: var(--radius); overflow: hidden; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--border); transform: scale(.95);
+}
+.under-media { position: relative; aspect-ratio: 16 / 9; background: linear-gradient(135deg, #3a1d4a, #1d2b4a); }
+.under-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.under-name { margin: 0; padding: 20px 24px; font-size: 32px; font-weight: 700; line-height: 1.1; }
+body.is-phone .under-name { padding: 16px; font-size: 24px; }
+/* No horizontal overscroll (bounce / history swipe on trackpads) fighting the card swipe. */
+html { overscroll-behavior-x: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The card fades instead of flying; the global rule above would make the fade instant. */
+  .card.fading { transition: opacity .2s linear !important; }
 }
