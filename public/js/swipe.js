@@ -105,11 +105,9 @@ export function showVoteStamp(vote) {
 export function resetCard() {
   const el = card();
   ++generation;
-  drag = null;
+  abortDrag();
   out = null;
-  cancelAnimationFrame(rafId);
-  rafId = 0;
-  el.classList.remove('dragging', 'moving', 'fading', 'played-out');
+  el.classList.remove('moving', 'fading', 'played-out');
   el.style.transition = '';
   el.style.opacity = '';
   applyOffset(REST);
@@ -118,8 +116,17 @@ export function resetCard() {
   unfreezeUnder();
 }
 
+// The room closed the card while a finger was still on it: the close animation wins.
+function abortDrag() {
+  drag = null;
+  cancelAnimationFrame(rafId);
+  rafId = 0;
+  card().classList.remove('dragging');
+}
+
 // Throws the card off screen from wherever it is, keeping the release velocity (px/ms).
 function throwCard(direction, { vx = 0, width = card().offsetWidth } = {}) {
+  abortDrag();
   setStamps(direction === 'right' ? 1 : 0, direction === 'right' ? 0 : 1);
   if (reducedMotion()) {
     setUnderScale(1);
@@ -142,6 +149,7 @@ export function playedOut() {
   if (out) return out;
   const el = card();
   ++generation;
+  abortDrag();
   setStamps(0, 0);
   el.style.transition = ''; // .card.played-out owns the timing
   el.classList.add('played-out');
@@ -192,7 +200,9 @@ export function prepareNextCard() {
 export async function revealNextCard() {
   const el = card();
   await mediaReady();
-  await nextFrame(); // commit the hidden card with its new content before fading it in
+  // Two frames: the hidden state must be rendered once, or the fade has no "from" to start at.
+  await nextFrame();
+  await nextFrame();
   el.style.transition = '';
   el.classList.add('fading');
   el.style.opacity = '';
@@ -203,7 +213,9 @@ export async function revealNextCard() {
   unfreezeUnder();
 }
 
-const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+// rAF never fires in a hidden tab (TV tab in the background, locked phone): the timeout keeps the
+// close sequence (and room.busy) from hanging there.
+const nextFrame = () => Promise.race([new Promise((resolve) => requestAnimationFrame(() => resolve())), wait(50)]);
 
 // The first thing the card shows: the screenshot/header <img>, or the trailer's poster.
 function mediaReady() {
@@ -280,9 +292,7 @@ function onPointerUp(e, onSwipe) {
 }
 
 function release(gesture, vx, onSwipe) {
-  cancelAnimationFrame(rafId);
-  rafId = 0;
-  card().classList.remove('dragging');
+  abortDrag();
   applyOffset(dragFrame(gesture.dx, gesture.dy, gesture.width)); // start exactly where the finger left it
   const vote = releaseDecision({ dx: gesture.dx, vx, threshold: swipeThreshold(gesture.width) });
   // onSwipe casts the vote and says whether it closes the card ('leave') or not ('stay').
@@ -293,12 +303,8 @@ function release(gesture, vx, onSwipe) {
 function onPointerCancel(e) {
   if (!drag || e.pointerId !== drag.id) return;
   const wasDragging = drag.axis === 'x';
-  drag = null;
-  cancelAnimationFrame(rafId);
-  rafId = 0;
-  if (!wasDragging) return;
-  card().classList.remove('dragging');
-  springBack();
+  abortDrag();
+  if (wasDragging) springBack();
 }
 
 /**

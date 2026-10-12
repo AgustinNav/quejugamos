@@ -29,9 +29,10 @@ export function freezeUnder() {
   frozen = true;
 }
 
+// Always repaints: details for the pending game may have arrived while frozen.
 export function unfreezeUnder() {
   frozen = false;
-  if (pendingId !== shownId) paint(pendingId);
+  paint(pendingId);
 }
 
 function paint(gameId) {
@@ -45,12 +46,4 @@ function paint(gameId) {
   if (url) img.src = url;
   else img.removeAttribute('src');
   $('underName').textContent = getGame(gameId)?.name ?? gameId;
-}
-
-/** Resolves once the under card's cover is decoded (or after maxMs), so the swap is invisible. */
-export function underReady(maxMs = 250) {
-  const img = $('underImg');
-  if (img.hidden || !img.src || typeof img.decode !== 'function') return Promise.resolve();
-  const timeout = new Promise((resolve) => setTimeout(resolve, maxMs));
-  return Promise.race([img.decode().catch(() => {}), timeout]);
 }
