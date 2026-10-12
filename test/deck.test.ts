@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDeck, parseFilters, priceFromDetails, shuffle } from '../src/deck.ts';
+import { buildDeck, MAX_EXCLUDED_GAMES, parseExcludeGameIds, parseFilters, priceFromDetails, shuffle } from '../src/deck.ts';
 import type { CatalogGame } from '../src/deck.ts';
 import { RoomError } from '../src/rooms.ts';
 import { GAMES, PLATFORMS } from '../public/games.js';
@@ -151,4 +151,44 @@ describe('priceFromDetails', () => {
     assert.equal(priceFromDetails({ id: 'x', players: [1, 1], platforms: [], priceLabel: 'Gratis' }, null), 0);
     assert.equal(priceFromDetails({ id: 'x', players: [1, 1], platforms: [] }, null), null);
   });
+});
+
+describe('excludeGameIds', () => {
+  const known = new Set(CATALOG.map((g) => g.id));
+  const all = { platforms: ['PC', 'Xbox', 'Switch'], maxPrice: null, fitsGroup: false };
+  const isInvalidFilters = (err: unknown) => err instanceof RoomError && err.status === 400 && err.code === 'invalid_filters';
+
+  test('buildDeck leaves excluded games out', () => {
+    const deck = buildDeck(CATALOG, all, 1, PRICES, identity, new Set(['pc-small', 'cheap-all']));
+    assert.deepEqual(deck, ['console-big', 'unknown-price']);
+  });
+
+  test('missing or empty means no exclusions; ids are deduped', () => {
+    assert.deepEqual(parseExcludeGameIds(all, known), []);
+    assert.deepEqual(parseExcludeGameIds({ ...all, excludeGameIds: [] }, known), []);
+    assert.deepEqual(parseExcludeGameIds({ ...all, excludeGameIds: ['pc-small', 'pc-small'] }, known), ['pc-small']);
+  });
+
+  test('parseFilters accepts the field but never returns it (it is not stored in the room)', () => {
+    const parsed = parseFilters({ ...all, excludeGameIds: ['pc-small'] }, PLATFORMS);
+    assert.ok(!('excludeGameIds' in parsed));
+  });
+
+  test(`accepts up to ${MAX_EXCLUDED_GAMES} ids, rejects more`, () => {
+    const many = Array.from({ length: MAX_EXCLUDED_GAMES }, (_, i) => CATALOG[i % CATALOG.length].id);
+    assert.equal(parseExcludeGameIds({ excludeGameIds: many }, known).length, CATALOG.length);
+    assert.throws(() => parseExcludeGameIds({ excludeGameIds: [...many, 'pc-small'] }, known), isInvalidFilters);
+  });
+
+  test('every real catalog id is accepted', () => {
+    const ids = GAMES.map((g) => g.id).slice(0, MAX_EXCLUDED_GAMES);
+    assert.equal(parseExcludeGameIds({ excludeGameIds: ids }, new Set(ids)).length, ids.length);
+  });
+
+  const bad: unknown[] = ['pc-small', null, {}, [1], ['not-a-game'], [''], [['pc-small']], [null]];
+  for (const value of bad) {
+    test(`rejects excludeGameIds ${JSON.stringify(value)}`, () => {
+      assert.throws(() => parseExcludeGameIds({ ...all, excludeGameIds: value }, known), isInvalidFilters);
+    });
+  }
 });

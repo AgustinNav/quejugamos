@@ -3,8 +3,9 @@ import { $, toast } from './dom.js';
 import { api } from './api.js';
 import { errorMessage } from './errors.js';
 import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
-import { currentGameId } from './views/voting.js';
+import { currentGameId, gameName } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
+import { bindPlayedHint, excludedGameIds } from './played.js';
 import { toggleMute } from './media.js';
 import { bindSwipe } from './swipe.js';
 
@@ -61,6 +62,25 @@ async function hostAction(call) {
 export const forceNext = () => hostAction(api.next);
 export const undo = () => hostAction(api.undo);
 
+// "Ya lo jugamos": any player skips the open card for the whole room (it never counts as a match).
+export async function skipCurrentGame() {
+  const room = activeRoom();
+  if (!canVote(room) || room.skipping) return;
+  const gameId = currentGameId(room.state);
+  const question = `¿Saltear «${gameName(gameId)}» para todos? No va a volver a aparecer en las próximas salas del host.`;
+  if (!window.confirm(question)) return;
+  room.skipping = true;
+  $('playedBtn').disabled = true;
+  try {
+    applyResponse(room, await api.skip(room.code, room.session.playerToken, gameId));
+  } catch (err) {
+    handleActionError(room, err);
+  } finally {
+    room.skipping = false;
+    $('playedBtn').disabled = false;
+  }
+}
+
 // Removes a duplicate/abandoned player so they stop blocking auto-advance and matches.
 export function kickPlayer(playerId) {
   const room = activeRoom();
@@ -78,8 +98,11 @@ function onKickClick(e) {
 export async function startVoting(filters) {
   const room = activeRoom();
   if (!room?.isHost) return;
+  // Games this browser's rooms already skipped as played stay out of the deck.
+  const excludeGameIds = excludedGameIds();
+  const body = excludeGameIds.length ? { ...filters, excludeGameIds } : filters;
   try {
-    applyResponse(room, await api.start(room.code, room.session.hostToken, filters));
+    applyResponse(room, await api.start(room.code, room.session.hostToken, body));
   } catch (err) {
     if (err.code === 'unauthorized') return handleActionError(room, err);
     setStartError(err.code);
@@ -109,6 +132,8 @@ export function bindActions() {
   $('voteNopeBtn').addEventListener('click', () => castVote('nope'));
   $('nextBtn').addEventListener('click', forceNext);
   $('undoBtn').addEventListener('click', undo);
+  $('playedBtn').addEventListener('click', skipCurrentGame);
+  bindPlayedHint();
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);
   document.addEventListener('keydown', onKeydown);

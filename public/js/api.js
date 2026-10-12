@@ -39,6 +39,7 @@ export const api = {
   start: (code, token, filters) => request('POST', roomPath(code, '/start'), { body: { filters }, token }),
   vote: (code, token, gameId, vote) => request('POST', roomPath(code, '/vote'), { body: { gameId, vote }, token }),
   next: (code, token) => request('POST', roomPath(code, '/next'), { body: {}, token }),
+  skip: (code, token, gameId) => request('POST', roomPath(code, '/skip'), { body: { gameId }, token }),
   undo: (code, token) => request('POST', roomPath(code, '/undo'), { body: {}, token }),
   kick: (code, token, playerId) => request('POST', roomPath(code, '/kick'), { body: { playerId }, token }),
   me: (code, token) => request('GET', roomPath(code, '/me'), { token }),
