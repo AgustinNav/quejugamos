@@ -104,6 +104,23 @@ export async function skipCurrentGame() {
   }
 }
 
+// Host deletes the room for everyone: names and votes are gone from the server right away.
+export async function closeRoom() {
+  const room = activeRoom();
+  if (!room?.isHost || room.closing) return;
+  if (!window.confirm('¿Cerrar la sala para todos? Se borran los nombres y los votos.')) return;
+  room.closing = true;
+  try {
+    await api.close(room.code, room.session.hostToken);
+    failRoom(room, 'closed'); // the `closed` SSE event may also arrive: failRoom is idempotent
+  } catch (err) {
+    if (err.code === 'room_not_found') return failRoom(room, 'closed');
+    handleActionError(room, err);
+  } finally {
+    room.closing = false;
+  }
+}
+
 // Removes a duplicate/abandoned player so they stop blocking auto-advance and matches.
 export function kickPlayer(playerId) {
   const room = activeRoom();
@@ -165,6 +182,7 @@ export function bindActions() {
   $('finishBtn').addEventListener('click', finishVoting);
   $('resumeVotingBtn').addEventListener('click', undo);
   bindRankingSheet(() => activeRoom()?.state);
+  document.querySelectorAll('[data-close-room]').forEach((btn) => btn.addEventListener('click', closeRoom));
   bindPlayedHint();
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);

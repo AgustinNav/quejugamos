@@ -108,6 +108,7 @@
       <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
       <p class="form-error" id="startError" role="alert"></p>
       <p class="played-hint" id="playedHint" hidden><span id="playedHintText"></span> · <button class="link-btn" type="button" id="playedResetBtn">Mostrar de nuevo</button></p>
+      <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
     </section>
   </main>
 
@@ -174,6 +175,7 @@
         <div class="host-controls">
           <button class="btn ghost" type="button" id="undoBtn" title="Deshacer (Z)">↶ Deshacer</button>
           <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
+          <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
         </div>
         <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
       </section>
@@ -195,6 +197,7 @@
         <h2>🏆 Ranking</h2>
         <button class="btn ghost resume-voting-btn" type="button" id="resumeVotingBtn" hidden>↶ Seguir votando</button>
         <a class="btn ghost" href="/" id="newRoomLink">Nueva sala</a>
+        <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
       </div>
       <p class="muted" id="resultsNote"></p>
       <ol class="ranking" id="ranking"></ol>

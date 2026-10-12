@@ -28,11 +28,20 @@ type Player = PublicPlayer & { token: string };
 
 export type CurrentVote = { playerId: string; gameId: string | null; vote: Vote | null };
 
+/** What a non-member may see: enough for the join screen, never names, votes, results or the deck. */
+export type PublicRoom = { code: string; phase: Phase; playerCount: number; maxPlayers: number };
+
+// idle: TTL without mutations; empty: nobody connected for emptyRoomTtlMs; closed_by_host: POST /close.
+export type ExpireReason = 'idle' | 'empty' | 'closed_by_host';
+
 type Room = Omit<Snapshot, 'players' | 'results' | 'currentVoters'> & {
   players: Player[];
   hostToken: string;
   history: CardResult[];
   lastActivity: number;
+  // Presence (live SSE streams). emptySince stays null until the room had a first connection.
+  liveConnections: number;
+  emptySince: number | null;
 };
 
 export type DeckBuilder = (filters: Filters, playerCount: number) => string[];
@@ -41,7 +50,7 @@ export type RoomStoreDeps = {
   now: () => number;
   randomInt: (maxExclusive: number) => number;
   uuid: () => string;
-  onExpire?: (code: string) => void;
+  onExpire?: (code: string, reason: ExpireReason) => void;
 };
 
 export type RoomLimits = {
@@ -54,6 +63,9 @@ export type RoomLimits = {
   lobbyTtlMs: number;
   // At capacity, a lone-host lobby idle this long is evicted to make room for a new one.
   lobbyEvictIdleMs: number;
+  // A room that had live connections and now has none is deleted after this long: names are personal
+  // data and an abandoned room should not keep them in memory for the whole idle TTL.
+  emptyRoomTtlMs: number;
 };
 
 export const DEFAULT_LIMITS: RoomLimits = {
@@ -64,6 +76,7 @@ export const DEFAULT_LIMITS: RoomLimits = {
   ttlMs: 2 * 60 * 60 * 1000,
   lobbyTtlMs: 20 * 60 * 1000,
   lobbyEvictIdleMs: 5 * 60 * 1000,
+  emptyRoomTtlMs: 10 * 60 * 1000,
 };
 
 export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -145,6 +158,7 @@ export class RoomStore {
     const room: Room = {
       code, phase: 'lobby', players: [host], filters: null, deck: [], index: 0, votes: {},
       lastResult: null, version: 1, hostToken: host.token, history: [], lastActivity: this.deps.now(),
+      liveConnections: 0, emptySince: null,
     };
     this.rooms.set(code, room);
     this.recordCreation(ip);
@@ -289,6 +303,44 @@ export class RoomStore {
     return toSnapshot(room);
   }
 
+  /** Full snapshot for a member of THIS room (host or player token), the public view for anyone else. */
+  view(code: string, token: string | null): Snapshot | PublicRoom {
+    const room = this.getRoom(code);
+    if (findPlayer(room, token)) return toSnapshot(room);
+    return { code: room.code, phase: room.phase, playerCount: room.players.length, maxPlayers: this.limits.maxPlayers };
+  }
+
+  /** Id of the player owning the token (401 otherwise). Used to bind SSE stream tickets. */
+  playerId(code: string, token: string | null): string {
+    return this.requirePlayer(this.getRoom(code), token).id;
+  }
+
+  /** False for an unknown/expired room or a player no longer in it (kicked). */
+  hasPlayer(code: string, playerId: string): boolean {
+    const room = this.rooms.get(code.toUpperCase());
+    return Boolean(room && !this.isExpired(room) && room.players.some((p) => p.id === playerId));
+  }
+
+  /** Host deletes the room right away: same removal path as expiry (streams get `closed`). */
+  close(code: string, token: string | null): void {
+    const room = this.getRoom(code);
+    this.requireHost(room, token);
+    this.remove(room.code, 'closed_by_host');
+  }
+
+  /**
+   * Live stream count for a room, reported by the SSE hub. Not a mutation: version and lastActivity
+   * stay as they are. Unknown codes are ignored (the hub reports 0 while a removed room closes).
+   */
+  setPresence(code: string, liveConnections: number): void {
+    const room = this.rooms.get(code);
+    if (!room) return;
+    const wasConnected = room.liveConnections > 0 || room.emptySince !== null;
+    room.liveConnections = liveConnections;
+    if (liveConnections > 0) room.emptySince = null;
+    else if (wasConnected && room.emptySince === null) room.emptySince = this.deps.now();
+  }
+
   /** The caller's own vote on the open card: the only way to read it before the card closes. */
   currentVote(code: string, token: string | null): CurrentVote {
     const room = this.getRoom(code);
@@ -301,7 +353,8 @@ export class RoomStore {
   expire(): string[] {
     const expired: string[] = [];
     for (const room of this.rooms.values()) {
-      if (this.isExpired(room)) expired.push(this.remove(room.code));
+      const reason = this.expiryReason(room);
+      if (reason) expired.push(this.remove(room.code, reason));
     }
     this.pruneCreations();
     return expired;
@@ -310,8 +363,9 @@ export class RoomStore {
   private getRoom(rawCode: string): Room {
     const room = this.rooms.get(rawCode.toUpperCase());
     if (!room) throw new RoomError(404, 'room_not_found', 'Room not found');
-    if (this.isExpired(room)) {
-      this.remove(room.code);
+    const reason = this.expiryReason(room);
+    if (reason) {
+      this.remove(room.code, reason);
       throw new RoomError(404, 'room_not_found', 'Room not found');
     }
     return room;
@@ -351,7 +405,7 @@ export class RoomStore {
   }
 
   private requirePlayer(room: Room, token: string | null): Player {
-    const player = token ? room.players.find((p) => tokensEqual(p.token, token)) : undefined;
+    const player = findPlayer(room, token);
     if (!player) throw new RoomError(401, 'unauthorized', 'Missing or invalid token for this room');
     return player;
   }
@@ -367,8 +421,14 @@ export class RoomStore {
   }
 
   private isExpired(room: Room): boolean {
+    return this.expiryReason(room) !== null;
+  }
+
+  private expiryReason(room: Room): ExpireReason | null {
+    const now = this.deps.now();
+    if (room.emptySince !== null && now - room.emptySince > this.limits.emptyRoomTtlMs) return 'empty';
     const ttl = isLoneHostLobby(room) ? this.limits.lobbyTtlMs : this.limits.ttlMs;
-    return this.deps.now() - room.lastActivity > ttl;
+    return now - room.lastActivity > ttl ? 'idle' : null;
   }
 
   /** Frees one slot by evicting the longest-idle lone-host lobby, if it has been idle long enough. */
@@ -377,12 +437,12 @@ export class RoomStore {
     for (const room of this.rooms.values()) {
       if (isLoneHostLobby(room) && (!oldest || room.lastActivity < oldest.lastActivity)) oldest = room;
     }
-    if (oldest && this.deps.now() - oldest.lastActivity >= this.limits.lobbyEvictIdleMs) this.remove(oldest.code);
+    if (oldest && this.deps.now() - oldest.lastActivity >= this.limits.lobbyEvictIdleMs) this.remove(oldest.code, 'idle');
   }
 
-  private remove(code: string): string {
+  private remove(code: string, reason: ExpireReason): string {
     this.rooms.delete(code);
-    this.deps.onExpire?.(code);
+    this.deps.onExpire?.(code, reason);
     return code;
   }
 
@@ -397,6 +457,10 @@ export class RoomStore {
 /** Finished by the host before the deck ran out: deck[index] is the card that was open (discarded). */
 function finishedEarly(room: Room): boolean {
   return room.phase === 'finished' && room.index < room.deck.length;
+}
+
+function findPlayer(room: Room, token: string | null): Player | undefined {
+  return token ? room.players.find((p) => tokensEqual(p.token, token)) : undefined;
 }
 
 function isLoneHostLobby(room: Room): boolean {

@@ -12,6 +12,7 @@ function makeStore(limits: Partial<RoomLimits> = {}) {
   let counter = 0;
   let seed = 42;
   const expired: string[] = [];
+  const reasons: string[] = [];
   const store = new RoomStore({
     now: () => clock.t,
     // Deterministic LCG: reproducible codes without cycling through a tiny period.
@@ -20,9 +21,9 @@ function makeStore(limits: Partial<RoomLimits> = {}) {
       return Math.floor((seed / 2147483648) * max);
     },
     uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
-    onExpire: (code) => expired.push(code),
+    onExpire: (code, reason) => { expired.push(code); reasons.push(reason); },
   }, limits);
-  return { store, clock, expired };
+  return { store, clock, expired, reasons };
 }
 
 function expectError(fn: () => unknown, status: number, code: string) {
@@ -778,5 +779,138 @@ describe('skip ("Ya lo jugamos")', () => {
     r.store.join(r.code, 'Late');
     r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
     assert.deepEqual(r.store.snapshot(r.code).results.a, skipped('a', r.bob.playerId));
+  });
+});
+
+const MIN = 60 * 1000;
+
+describe('presence-based cleanup (empty rooms)', () => {
+  test('a room whose last stream disconnected is deleted after 10 min with nobody connected', () => {
+    const { store, clock, expired, reasons } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
+    store.setPresence(code, 2);
+    store.setPresence(code, 0);
+    clock.t += 10 * MIN;
+    assert.deepEqual(store.expire(), [], 'exactly 10 min is still inside the window');
+    clock.t += 1;
+    assert.deepEqual(store.expire(), [code]);
+    assert.deepEqual(expired, [code]);
+    assert.deepEqual(reasons, ['empty']);
+    expectError(() => store.snapshot(code), 404, 'room_not_found');
+  });
+
+  test('reconnecting within the window cancels the countdown', () => {
+    const { store, clock } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
+    store.setPresence(code, 1);
+    store.setPresence(code, 0);
+    clock.t += 9 * MIN;
+    store.setPresence(code, 1);
+    clock.t += 30 * MIN;
+    assert.deepEqual(store.expire(), [], 'connected: only the 2 h idle TTL applies');
+    store.setPresence(code, 0);
+    clock.t += 10 * MIN + 1;
+    assert.deepEqual(store.expire(), [code], 'the window restarts from the last disconnect');
+  });
+
+  test('a finished room is deleted 10 min after its last client left', () => {
+    const { store, clock, reasons } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    store.setPresence(host.code, 1);
+    store.start(host.code, host.hostToken, FILTERS, () => ['a']);
+    store.vote(host.code, host.hostToken, 'a', 'like');
+    assert.equal(store.snapshot(host.code).phase, 'finished');
+    clock.t += 60 * MIN;
+    assert.deepEqual(store.expire(), [], 'still connected');
+    store.setPresence(host.code, 0);
+    clock.t += 10 * MIN + 1;
+    assert.deepEqual(store.expire(), [host.code]);
+    assert.deepEqual(reasons, ['empty']);
+  });
+
+  test('a room that never had a connection keeps the lobby / 2 h TTLs', () => {
+    const { store, clock, reasons } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
+    store.setPresence(code, 0); // a 0 report without a prior connection starts nothing
+    clock.t += 11 * MIN;
+    assert.deepEqual(store.expire(), []);
+    clock.t += 2 * 60 * MIN;
+    assert.deepEqual(store.expire(), [code]);
+    assert.deepEqual(reasons, ['idle']);
+  });
+
+  test('presence is not a mutation and unknown codes are ignored', () => {
+    const { store } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    const version = store.snapshot(code).version;
+    store.setPresence(code, 3);
+    store.setPresence('ZZZZZZ', 0);
+    assert.equal(store.snapshot(code).version, version);
+  });
+
+  test('the window is configurable', () => {
+    const { store, clock } = makeStore({ emptyRoomTtlMs: 1000 });
+    const { code } = store.create('Host', '1.1.1.1');
+    store.setPresence(code, 1);
+    store.setPresence(code, 0);
+    clock.t += 1001;
+    expectError(() => store.snapshot(code), 404, 'room_not_found');
+  });
+});
+
+describe('host closes the room', () => {
+  test('close deletes the room immediately with reason closed_by_host', () => {
+    const { store, expired, reasons } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const ana = store.join(host.code, 'Ana');
+    store.close(host.code, host.hostToken);
+    assert.deepEqual(expired, [host.code]);
+    assert.deepEqual(reasons, ['closed_by_host']);
+    assert.equal(store.size, 0);
+    expectError(() => store.snapshot(host.code), 404, 'room_not_found');
+    expectError(() => store.currentVote(host.code, ana.playerToken), 404, 'room_not_found');
+  });
+
+  test('a non-host gets 403 not_host, no token or a foreign token 401; the room survives', () => {
+    const { store, expired } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const other = store.create('Other', '1.1.1.2');
+    const ana = store.join(host.code, 'Ana');
+    expectError(() => store.close(host.code, ana.playerToken), 403, 'not_host');
+    expectError(() => store.close(host.code, null), 401, 'unauthorized');
+    expectError(() => store.close(host.code, other.hostToken), 401, 'unauthorized');
+    expectError(() => store.close('ZZZZZZ', host.hostToken), 404, 'room_not_found');
+    assert.deepEqual(expired, []);
+    assert.equal(store.snapshot(host.code).players.length, 2);
+  });
+});
+
+describe('member view vs public view', () => {
+  test('members get the snapshot; no token or a foreign token gets only code/phase/counts', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const other = store.create('Other', '1.1.1.2');
+    const ana = store.join(host.code, 'Ana');
+    assert.deepEqual(store.view(host.code, ana.playerToken), store.snapshot(host.code));
+    assert.deepEqual(store.view(host.code, host.hostToken), store.snapshot(host.code));
+    const expected = { code: host.code, phase: 'lobby', playerCount: 2, maxPlayers: 12 };
+    assert.deepEqual(store.view(host.code, null), expected);
+    assert.deepEqual(store.view(host.code, other.hostToken), expected);
+    assert.deepEqual(store.view(host.code, 'garbage'), expected);
+  });
+
+  test('playerId / hasPlayer bind tickets to a member and notice kicks', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const ana = store.join(host.code, 'Ana');
+    assert.equal(store.playerId(host.code, ana.playerToken), ana.playerId);
+    expectError(() => store.playerId(host.code, null), 401, 'unauthorized');
+    assert.equal(store.hasPlayer(host.code, ana.playerId), true);
+    store.kick(host.code, host.hostToken, ana.playerId);
+    assert.equal(store.hasPlayer(host.code, ana.playerId), false);
+    assert.equal(store.hasPlayer('ZZZZZZ', ana.playerId), false);
   });
 });

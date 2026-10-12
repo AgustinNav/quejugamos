@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, openSse, startTestServer } from './helpers.ts';
+import { api, eventsPath, openRoomSse, startTestServer } from './helpers.ts';
 
 test('6th room from the same IP within an hour gets 429 rate_limited', async () => {
   const srv = await startTestServer();
@@ -19,9 +19,9 @@ test('SSE connection cap per room answers 503', async () => {
   const srv = await startTestServer({ sse: { maxPerRoom: 1 } });
   const base = `http://127.0.0.1:${srv.port}`;
   const room = await api(base, 'POST', '/api/rooms', { hostName: 'H' });
-  const first = await openSse(`${base}/api/rooms/${room.body.code}/events`);
+  const first = await openRoomSse(base, room.body.code, room.body.hostToken);
   try {
-    const second = await api(base, 'GET', `/api/rooms/${room.body.code}/events`);
+    const second = await api(base, 'GET', await eventsPath(base, room.body.code, room.body.hostToken));
     assert.equal(second.status, 503);
   } finally {
     first.close();
@@ -33,7 +33,7 @@ test('graceful close sends event: closed to SSE clients and stops the server', a
   const srv = await startTestServer();
   const base = `http://127.0.0.1:${srv.port}`;
   const room = await api(base, 'POST', '/api/rooms', { hostName: 'H' });
-  const sse = await openSse(`${base}/api/rooms/${room.body.code}/events`);
+  const sse = await openRoomSse(base, room.body.code, room.body.hostToken);
   await sse.waitFor((e) => e.event === 'state');
   await srv.close();
   await sse.waitFor((e) => e.event === 'closed');

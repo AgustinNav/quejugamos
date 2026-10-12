@@ -50,7 +50,7 @@ npm test
 ## Datos y límites
 
 - Precio, trailer, capturas y reseñas vienen en vivo de Steam (cache de 6 h). Plataformas y crossplay están cargados a mano: los marcados "verificar" no están confirmados.
-- Las salas viven en memoria: se pierden si el server se reinicia y expiran tras 2 h sin actividad. Por eso corre en **una sola instancia**.
+- Las salas viven en memoria: se pierden si el server se reinicia, expiran tras 2 h sin actividad, se borran a los 10 min de quedar sin nadie conectado y el host puede cerrarlas en el momento. Por eso corre en **una sola instancia**.
 - Límites: 12 jugadores por sala, 500 salas activas, 5 salas creadas por IP por hora.
 
 ## Seguridad
