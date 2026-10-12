@@ -6,14 +6,14 @@
 - **3 guiones de 15–25 s** listos para grabar, cada uno con un ángulo distinto: el dolor, el match, el POV. **El más fuerte es el B (match)**: el payoff es visual y genuino.
 - **Grabá la app y caras reales, no trailers.** Silenciá el trailer dentro de la app al grabar. Audio: solo de la **Commercial Music Library** (CML).
 - 6 posts en 2 semanas: 3 guiones + 3 formatos baratos (pantalla sola, reacción, "dejame elegir a mí").
-- `{APP}` = nombre final (ver `naming.md`; recomendado: Swipeamos). `{URL}` = dominio final. **Nunca "Tinder"** en texto, voz, caption ni hashtags.
+- `{APP}` = **¿Qué Jugamos?** (decidido, ver `naming.md`). `{URL}` = `quejugamos.onrender.com` hasta tener `quejugamos.com.ar`, siempre con `?ref=` (ver `estrategia-organica.md` §5). **Nunca "Tinder"** en texto, voz, caption ni hashtags.
 
 ## Qué es verdad hoy (no prometer más que esto)
 | Sí | No (no lo digas ni lo insinúes) |
 |---|---|
 | Gratis, sin cuenta, desde el navegador del celu | "Descargala" — no hay app en stores |
 | Host crea sala → QR / código → cada uno vota en su celu | Integración con PlayStation Store / Xbox / Switch eShop |
-| ~43 juegos co-op/party curados a mano | "Todos los juegos de Steam" |
+| 107 juegos co-op/party curados a mano | "Todos los juegos de Steam" |
 | Precio en vivo de **Steam Argentina, en USD** | Precios en pesos / precios de consola |
 | Trailer, jugadores, plataformas, crossplay (algunos marcados "verificar") | Crossplay garantizado |
 | Hasta 12 jugadores por sala | "Sin límite" |
@@ -158,6 +158,6 @@ Regla: después del post 3, **repetí el hook que mejor retuvo** (mirá retenci�
 | Usar "Tinder" | Marca registrada → takedown, problema para registrar tu nombre | Prohibido en nombre, copy, voz, hashtags. Usar "swipe" / "deslizá" |
 | **Prometer features que no existen** | Comentarios negativos, gente que se va al primer uso | Ver tabla "Qué es verdad hoy". Puntos sensibles: **no hay cuentas**, **no hay integración con stores de consola**, **los precios son de Steam Argentina en USD** (no pesos, no precio de consola) |
 | Crossplay "verificar" | Alguien compra por crossplay y no anda | No mencionar crossplay como argumento hasta verificar los datos |
-| Pico de tráfico si un video pega | Cloud Run con `max-instances=1`: 500 salas máx y 5 salas/IP/hora → errores `capacity` / `rate_limited` | Avisá antes de publicar el Guion B; tené a mano subir el límite. Un mensaje de "estamos llenos, probá en un rato" es mejor que un error crudo |
+| Pico de tráfico si un video pega | Render free, una sola instancia: 500 salas máx, 12 jugadores/sala, 5 salas/IP/hora → errores `capacity` / `rate_limited`; cold start ~1 min | Avisá antes de publicar el Guion B; subir el límite = deploy = se borran las salas en curso (ver `estrategia-organica.md` §7). Un mensaje de "estamos llenos, probá en un rato" es mejor que un error crudo |
 | Música no licenciada | Audio muteado / video bajado | Solo CML en TikTok; biblioteca de IG en Reels |
 | Mostrar nombres reales / chats de Discord de amigos | Privacidad de terceros | Tapar nombres y avatares; pedir OK a cada amigo que sale en cámara |
