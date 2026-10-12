@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CODE_ALPHABET, RoomError, RoomStore } from '../src/rooms.ts';
 import type { Filters, RoomLimits } from '../src/rooms.ts';
 
-const FILTERS: Filters = { platforms: ['PC'], maxPrice: null, fitsGroup: true };
+const FILTERS: Filters = { platforms: ['PC'], maxPrice: null, fitsGroup: true, playerCount: null };
 const DECK = ['a', 'b', 'c'];
 const fixedDeck = () => [...DECK];
 

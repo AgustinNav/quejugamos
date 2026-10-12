@@ -132,8 +132,6 @@ a { color: inherit; }
 .filter { margin-bottom: 18px; }
 .filter > label, .filter-label { display: block; color: var(--muted); margin-bottom: 8px; }
 .filter input[type=range] { width: 100%; accent-color: var(--accent); min-height: 32px; }
-.check { display: flex !important; gap: 10px; align-items: center; color: var(--text) !important; cursor: pointer; min-height: 44px; }
-.check input { width: 22px; height: 22px; accent-color: var(--accent); }
 .platform-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
 .toggle {
   font: inherit; cursor: pointer; padding: 10px 16px; border-radius: 999px; min-height: 44px;

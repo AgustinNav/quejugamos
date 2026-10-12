@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { api, openSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
 import type { SseClient, TestServer } from './helpers.ts';
+import { GAMES } from '../public/games.js';
 
 const FILTERS = { platforms: ['PC', 'PlayStation', 'Xbox', 'Switch', 'Mobile'], maxPrice: null, fitsGroup: false };
 
@@ -111,7 +112,8 @@ describe('full flow', () => {
     const res = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { ...FILTERS, maxPrice: 5 } }, room.hostToken);
     assert.equal(res.status, 200);
     // Every Steam game costs 9.99 in the stub, so only non-Steam games (unknown/free price) remain.
-    for (const id of res.body.deck) assert.ok(['minecraft', 'fortnite', 'valorant'].includes(id), id);
+    const nonSteam = GAMES.filter((g) => !g.steamId).map((g) => g.id);
+    for (const id of res.body.deck) assert.ok(nonSteam.includes(id), id);
   });
 
   test('start answers 422 empty_deck and 400 invalid_filters', async () => {
@@ -122,6 +124,25 @@ describe('full flow', () => {
     const bad = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { platforms: 'PC' } }, room.hostToken);
     assert.equal(bad.status, 400);
     assert.equal(bad.body.error, 'invalid_filters');
+  });
+
+  test('start validates playerCount (400) and an explicit count filters the deck', async () => {
+    const room = await createRoom();
+    for (const playerCount of [0, 33, 2.5, '4', true, [2], { n: 2 }]) {
+      const res = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { ...FILTERS, playerCount } }, room.hostToken);
+      assert.equal(res.status, 400, JSON.stringify(playerCount));
+      assert.equal(res.body.error, 'invalid_filters');
+    }
+    await assertAlive();
+    const { fitsGroup: _legacy, ...modern } = FILTERS;
+    const res = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { ...modern, playerCount: 8 } }, room.hostToken);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.filters.playerCount, 8);
+    const byId = new Map(GAMES.map((g) => [g.id, g]));
+    for (const id of res.body.deck) {
+      const [min, max] = byId.get(id)!.players;
+      assert.ok(min <= 8 && max >= 8, id);
+    }
   });
 
   test('kick: host removes a ghost player, the card closes and SSE gets the new snapshot', async () => {

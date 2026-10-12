@@ -97,7 +97,8 @@
         <input type="range" id="maxPrice" min="0" max="70" step="5" value="70">
       </div>
       <div class="filter">
-        <label class="check"><input type="checkbox" id="fitsGroup" checked> Solo juegos donde entremos todos</label>
+        <span class="filter-label" id="playerCountLabel">¿Cuántos van a jugar?</span>
+        <div class="platform-toggles" id="playerCountToggles" role="group" aria-labelledby="playerCountLabel"></div>
       </div>
       <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
       <p class="form-error" id="startError" role="alert"></p>
