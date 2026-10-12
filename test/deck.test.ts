@@ -155,7 +155,7 @@ describe('priceFromDetails', () => {
 
 describe('excludeGameIds', () => {
   const known = new Set(CATALOG.map((g) => g.id));
-  const all = { platforms: ['PC', 'Xbox', 'Switch'], maxPrice: null, fitsGroup: false };
+  const all = { platforms: ['PC', 'Xbox', 'Switch'], maxPrice: null, playerCount: null, fitsGroup: false };
   const isInvalidFilters = (err: unknown) => err instanceof RoomError && err.status === 400 && err.code === 'invalid_filters';
 
   test('buildDeck leaves excluded games out', () => {

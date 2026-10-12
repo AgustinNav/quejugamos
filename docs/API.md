@@ -55,7 +55,7 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
 | POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes) | 401, 403, 409 `nothing_to_undo` |
 | POST | `/api/rooms/:code/kick` | host | `{ "playerId": string }` | `200 Snapshot` (removes the player; see Rules) | 400 `invalid_player`, 401, 403 `not_host`, 404 `player_not_found`, 409 `cannot_kick_host` |
 | GET | `/api/rooms/:code/events` | — | — | `text/event-stream` (`HEAD` answers the headers and ends, without opening a stream) | 404, 429, 503 `capacity` |
-| GET | `/api/steam/:appId` | — | — | `200` Steam details (unchanged from v1; `stale: true` when served from an old cache entry) | 404 `unknown_game`, 429, 502 `steam_unavailable` (a failed app is not retried upstream for 120 s; after a Steam 429, no upstream calls for 60 s) |
+| GET | `/api/steam/:appId` | — | — | `200 SteamDetails` (see below; `stale: true` when served from an old cache entry) | 404 `unknown_game`, 429, 502 `steam_unavailable` (a failed app is not retried upstream for 120 s; after a Steam 429, no upstream calls for 60 s) |
 | GET | `/healthz` | — | — | `200 { "ok": true }` | — |
 
 `401 unauthorized` = missing or invalid token for this room. `vote: null` clears that player's vote.
@@ -79,6 +79,24 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
   2. `playerCount` is `null` → `fitsGroup` decides; it is optional and defaults to `true` (send `false` to disable the size filter).
   3. `playerCount` absent (old clients) → `fitsGroup` is **required** (boolean), as before.
 - The snapshot echoes the normalized filters: both `fitsGroup` and `playerCount` are always present.
+
+**`SteamDetails`** (`/api/steam/:appId`):
+
+```jsonc
+{
+  "name": string, "isFree": boolean,
+  "price": { "final": number, "initial"?: number, "currency"?: string, "discount_percent"?: number } | null,
+  "shortDescription": string, "header": string, "genres": string[], "categories": string[],
+  "reviews": number | null, "metacritic": number | null, "releaseDate": string | null,
+  "movies": Movie[],            // playable trailers, highlighted first, max 6 (may be [])
+  "movie": Movie | null,        // = movies[0]; kept for older clients
+  "screenshots": string[],      // full-size URLs, max 12
+  "screenshotThumbs": string[]  // same order/length as screenshots (Steam thumbnails)
+}
+// Movie = { "name": string, "poster": string | null, "hls": string | null, "mp4": string | null } — at least one of hls/mp4 is set
+```
+
+Clients must tolerate a `stale: true` response from an older cache that has only `movie` and up to 4 `screenshots` (no `movies` / `screenshotThumbs`): fall back to `[movie]` and to the full-size URLs.
 
 ## Rules
 

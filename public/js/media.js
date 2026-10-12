@@ -1,17 +1,21 @@
-// Trailer (mp4 or HLS via hls.js) / screenshot area of the card.
+// Media area of the card: trailer (see player.js) or screenshot, sound controls, and the
+// button that opens the fullscreen gallery.
 import { $, esc } from './dom.js';
 import { getDetails } from './catalog.js';
+import { attachMovie, playQuietly } from './player.js';
+import { applyAudio, audioState, onAudioChange, setVolume, stepVolume, toggleMute as toggleAudioMute, volumeSupported } from './audio.js';
+import { bindGallery, closeGallery, galleryItems, openGallery } from './gallery.js';
 
-let hls = null;
-let muted = true;
-let currentGameId = null;
+// The card strip stays short; the full set lives in the gallery.
+const CARD_SHOTS = 4;
+
+let player = null;
+let currentGame = null;
+let selectedIndex = 0; // gallery index of what the card shows, so the gallery opens there
 
 export function stopVideo() {
-  if (hls) { hls.destroy(); hls = null; }
-  const video = $('video');
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
+  player?.destroy();
+  player = null;
 }
 
 function playTrailer(movie) {
@@ -19,18 +23,9 @@ function playTrailer(movie) {
   stopVideo();
   video.hidden = false;
   $('mediaImg').hidden = true;
-  video.poster = movie.poster || '';
-  video.muted = muted;
-  if (movie.mp4) {
-    video.src = movie.mp4;
-  } else if (window.Hls?.isSupported()) {
-    hls = new window.Hls({ capLevelToPlayerSize: true });
-    hls.loadSource(movie.hls);
-    hls.attachMedia(video);
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = movie.hls;
-  }
-  video.play().catch(() => { /* autoplay can be blocked until the first user gesture */ });
+  applyAudio(video);
+  player = attachMovie(video, movie);
+  playQuietly(video);
 }
 
 function showImage(url) {
@@ -48,49 +43,100 @@ function showPlaceholder(game) {
   $('media').insertAdjacentHTML('afterbegin', `<div class="placeholder">${esc(game.name)}</div>`);
 }
 
-function renderShots(d) {
-  const shots = [];
-  if (d.movie) shots.push('<button type="button" class="trailer-thumb active" data-trailer aria-label="Ver trailer">▶ Trailer</button>');
-  (d.screenshots || []).forEach((src, i) => {
-    const active = !d.movie && i === 0 ? 'active' : '';
-    shots.push(`<button type="button" data-shot="${esc(src)}" class="${active}" aria-label="Captura ${i + 1}"><img src="${esc(src)}" alt="" loading="lazy"></button>`);
+// Buttons carry the gallery index of their item; the first trailer is the card's trailer.
+function renderShots(items) {
+  const trailerIndex = items.findIndex((item) => item.kind === 'movie');
+  const shots = items.filter((item) => item.kind === 'image').slice(0, CARD_SHOTS);
+  const buttons = [];
+  if (trailerIndex !== -1) buttons.push(`<button type="button" class="trailer-thumb" data-index="${trailerIndex}" aria-label="Ver trailer">▶ Trailer</button>`);
+  shots.forEach((item, i) => {
+    buttons.push(`<button type="button" data-index="${items.indexOf(item)}" aria-label="Captura ${i + 1}"><img src="${esc(item.thumb)}" alt="" loading="lazy"></button>`);
   });
-  $('shots').innerHTML = shots.join('');
-  $('muteBtn').hidden = !d.movie;
+  $('shots').innerHTML = buttons.join('');
+}
+
+function markSelected() {
+  $('shots').querySelectorAll('button').forEach((b) => b.classList.toggle('active', Number(b.dataset.index) === selectedIndex));
+}
+
+function renderControls(items) {
+  const hasTrailer = items.some((item) => item.kind === 'movie');
+  $('muteBtn').hidden = !hasTrailer;
+  $('volumeSlider').hidden = !hasTrailer || !volumeSupported;
+  $('galleryBtn').hidden = items.length === 0;
+}
+
+function showItem(item, index) {
+  selectedIndex = index;
+  if (item.kind === 'movie') playTrailer(item.movie);
+  else showImage(item.src);
+  markSelected();
 }
 
 // force=true re-renders even for the same game (details arrived after the first paint).
 export function renderMedia(game, { force = false } = {}) {
-  if (!force && currentGameId === game.id) return;
-  currentGameId = game.id;
+  if (!force && currentGame?.id === game.id) return;
+  closeGallery({ resume: false }); // the card moved on: the gallery would show the wrong game
+  currentGame = game;
   const d = getDetails(game.id) || {};
+  const items = galleryItems(d);
   $('media').querySelector('.placeholder')?.remove();
-  renderShots(d);
-  if (d.movie) return playTrailer(d.movie);
-  if (d.screenshots?.length || d.header) return showImage(d.screenshots?.[0] || d.header);
+  renderShots(items);
+  renderControls(items);
+  if (items.length) return showItem(items[0], 0);
+  selectedIndex = 0;
+  if (d.header) return showImage(d.header);
   showPlaceholder(game);
 }
 
 export function resetMedia() {
-  currentGameId = null;
+  closeGallery({ resume: false });
+  currentGame = null;
   stopVideo();
 }
 
-export function toggleMute() {
-  muted = !muted;
-  $('video').muted = muted;
-  $('muteBtn').textContent = muted ? '🔇' : '🔊';
-  $('muteBtn').setAttribute('aria-label', muted ? 'Activar sonido del trailer' : 'Silenciar trailer');
+export const toggleMute = toggleAudioMute;
+export const volumeUp = () => stepVolume(1);
+export const volumeDown = () => stepVolume(-1);
+
+function renderAudio({ muted, volume }) {
+  const percent = Math.round(volume * 100);
+  const button = $('muteBtn');
+  button.textContent = muted ? '🔇' : volume < 0.5 ? '🔉' : '🔊';
+  button.setAttribute('aria-label', muted ? 'Activar sonido del trailer' : 'Silenciar trailer');
+  const slider = $('volumeSlider');
+  slider.value = String(muted ? 0 : percent);
+  slider.setAttribute('aria-valuetext', muted ? 'Silenciado' : `${percent} %`);
+  applyAudio($('video'));
+}
+
+export function openCardGallery() {
+  const items = galleryItems(currentGame && getDetails(currentGame.id));
+  if (!currentGame || !items.length) return;
+  const video = $('video');
+  const wasPlaying = Boolean(player) && !video.paused;
+  video.pause(); // one sound source at a time
+  openGallery({
+    title: currentGame.name,
+    items,
+    start: Math.min(selectedIndex, items.length - 1),
+    onClose: ({ resume }) => { if (resume && wasPlaying && player) playQuietly(video); },
+  });
 }
 
 export function bindMedia() {
   $('shots').addEventListener('click', (e) => {
-    const btn = e.target.closest('button');
-    if (!btn) return;
-    $('shots').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
-    const d = getDetails(currentGameId);
-    if (btn.dataset.trailer !== undefined && d?.movie) playTrailer(d.movie);
-    else if (btn.dataset.shot) showImage(btn.dataset.shot);
+    const button = e.target.closest('button[data-index]');
+    const items = galleryItems(currentGame && getDetails(currentGame.id));
+    const index = Number(button?.dataset.index);
+    if (button && items[index]) showItem(items[index], index);
   });
-  $('muteBtn').addEventListener('click', toggleMute);
+  $('muteBtn').addEventListener('click', toggleAudioMute);
+  $('volumeSlider').addEventListener('input', (e) => setVolume(Number(e.target.value) / 100));
+  $('galleryBtn').addEventListener('click', openCardGallery);
+  // Dragging the slider must not drag (and vote) the card underneath.
+  $('mediaActions').addEventListener('pointerdown', (e) => e.stopPropagation());
+  onAudioChange(renderAudio);
+  renderAudio(audioState());
+  bindGallery();
 }
