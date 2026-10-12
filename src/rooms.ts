@@ -223,9 +223,26 @@ export class RoomStore {
     return toSnapshot(room);
   }
 
+  /**
+   * Host ends voting before the deck runs out. The open card is discarded (its votes dropped, no
+   * result): only cards that actually closed are ranked. undo() reopens that same card.
+   */
+  finish(code: string, token: string | null): Snapshot {
+    const room = this.getRoom(code);
+    this.requireHost(room, token);
+    if (room.phase !== 'voting') throw new RoomError(409, 'not_voting', 'The room is not voting');
+    delete room.votes[room.deck[room.index]];
+    room.phase = 'finished';
+    // null so clients don't replay the previous card's swipe/match animation.
+    room.lastResult = null;
+    this.touch(room);
+    return toSnapshot(room);
+  }
+
   undo(code: string, token: string | null): Snapshot {
     const room = this.getRoom(code);
     this.requireHost(room, token);
+    if (finishedEarly(room)) return this.resumeVoting(room);
     if (room.phase === 'lobby' || room.index === 0) throw new RoomError(409, 'nothing_to_undo', 'There is no closed card to reopen');
     room.history.pop();
     room.index -= 1;
@@ -262,6 +279,14 @@ export class RoomStore {
 
   snapshot(code: string): Snapshot {
     return toSnapshot(this.getRoom(code));
+  }
+
+  /** Undo of an early finish: the card that was open comes back with no votes; closed cards stay closed. */
+  private resumeVoting(room: Room): Snapshot {
+    room.phase = 'voting';
+    room.lastResult = null;
+    this.touch(room);
+    return toSnapshot(room);
   }
 
   /** The caller's own vote on the open card: the only way to read it before the card closes. */
@@ -367,6 +392,11 @@ export class RoomStore {
       if (!times.some((at) => at > cutoff)) this.creationsByIp.delete(ip);
     }
   }
+}
+
+/** Finished by the host before the deck ran out: deck[index] is the card that was open (discarded). */
+function finishedEarly(room: Room): boolean {
+  return room.phase === 'finished' && room.index < room.deck.length;
 }
 
 function isLoneHostLobby(room: Room): boolean {

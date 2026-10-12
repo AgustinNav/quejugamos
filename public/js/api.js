@@ -41,6 +41,7 @@ export const api = {
   next: (code, token) => request('POST', roomPath(code, '/next'), { body: {}, token }),
   skip: (code, token, gameId) => request('POST', roomPath(code, '/skip'), { body: { gameId }, token }),
   undo: (code, token) => request('POST', roomPath(code, '/undo'), { body: {}, token }),
+  finish: (code, token) => request('POST', roomPath(code, '/finish'), { body: {}, token }),
   kick: (code, token, playerId) => request('POST', roomPath(code, '/kick'), { body: { playerId }, token }),
   me: (code, token) => request('GET', roomPath(code, '/me'), { token }),
   steam: (appId) => request('GET', `/api/steam/${encodeURIComponent(appId)}`),

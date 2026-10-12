@@ -432,3 +432,35 @@ body.gallery-open { overflow: hidden; }
   .gallery-thumbs { padding: 8px 12px 12px; gap: 8px; }
   .gallery-thumb { width: 96px; }
 }
+
+/* ===== Finish early + partial ranking ===== */
+.finish-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.finish-row .btn { min-height: 48px; }
+/* Ending the vote is the host's call; players only get the partial ranking. */
+body:not(.is-host) .finish-btn, body:not(.is-host) .resume-voting-btn { display: none !important; }
+.finish-btn { border-color: var(--gold); color: var(--gold); }
+body.is-phone .finish-row .btn { flex: 1 1 100%; }
+
+.ranking-sheet {
+  width: min(960px, 100%); max-width: 100%; max-height: min(88vh, 900px); margin: auto auto 0;
+  padding: 0; border: 1px solid var(--border); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--panel); color: var(--text); overflow: hidden;
+}
+.ranking-sheet[open] { display: flex; flex-direction: column; }
+.ranking-sheet::backdrop { background: rgba(8,9,12,.75); backdrop-filter: blur(3px); }
+.ranking-sheet-body {
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 20px 20px calc(20px + env(safe-area-inset-bottom));
+}
+.ranking-sheet-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  position: sticky; top: -20px; z-index: 1; margin: -20px -20px 0; padding: 20px 20px 12px; background: var(--panel);
+}
+.ranking-sheet-head h2 { margin: 0; }
+.ranking-sheet-head .btn { min-height: 48px; }
+#rankingSheetNote { margin: 10px 0 0; }
+#rankingSheetNote:empty { display: none; }
+#partialRanking { margin-top: 14px; }
+@media (min-width: 961px) {
+  .ranking-sheet { margin: auto; border-bottom: 1px solid var(--border); border-radius: var(--radius); }
+}

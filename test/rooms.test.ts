@@ -399,6 +399,105 @@ describe('undo', () => {
   });
 });
 
+describe('finish (end voting early)', () => {
+  test('mid-deck: keeps closed results, discards the open card and its votes', () => {
+    const r = votingRoom();
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.ana.playerToken, 'b', 'nope');
+    r.store.next(r.code, r.host.hostToken); // b closes with 1 nope
+    r.store.vote(r.code, r.ana.playerToken, 'c', 'like'); // open card, must be dropped
+    const before = r.store.snapshot(r.code);
+    const snap = r.store.finish(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'finished');
+    assert.equal(snap.index, 2);
+    assert.equal(snap.version, before.version + 1);
+    assert.equal(snap.lastResult, null);
+    assert.deepEqual(Object.keys(snap.results), ['a', 'b']);
+    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 3, nopes: 0, match: true });
+    assert.equal(snap.results.c, undefined);
+    // Outside voting the open card's votes would show up in `votes`: they must be gone, not leaked.
+    assert.equal(snap.votes.c, undefined);
+    assert.deepEqual(snap.currentVoters, []);
+  });
+
+  test('on the first card: finishes with no results', () => {
+    const r = votingRoom();
+    const snap = r.store.finish(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'finished');
+    assert.equal(snap.index, 0);
+    assert.deepEqual(snap.results, {});
+  });
+
+  test('rejects in lobby and when already finished (409 not_voting)', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    expectError(() => store.finish(host.code, host.hostToken), 409, 'not_voting');
+    store.start(host.code, host.hostToken, FILTERS, fixedDeck);
+    store.finish(host.code, host.hostToken);
+    expectError(() => store.finish(host.code, host.hostToken), 409, 'not_voting');
+  });
+
+  test('rejects after the deck ran out (normal finish)', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    store.start(host.code, host.hostToken, FILTERS, () => ['x']);
+    store.next(host.code, host.hostToken);
+    expectError(() => store.finish(host.code, host.hostToken), 409, 'not_voting');
+  });
+
+  test('requires the host (403) and a valid token (401), without changing state', () => {
+    const r = votingRoom();
+    const version = r.store.snapshot(r.code).version;
+    expectError(() => r.store.finish(r.code, r.ana.playerToken), 403, 'not_host');
+    expectError(() => r.store.finish(r.code, null), 401, 'unauthorized');
+    expectError(() => r.store.finish(r.code, 'nope'), 401, 'unauthorized');
+    assert.equal(r.store.snapshot(r.code).phase, 'voting');
+    assert.equal(r.store.snapshot(r.code).version, version);
+  });
+
+  test('votes and skips are rejected once finished; joins are refused', () => {
+    const r = votingRoom();
+    r.store.finish(r.code, r.host.hostToken);
+    expectError(() => r.store.vote(r.code, r.ana.playerToken, 'a', 'like'), 409, 'not_voting');
+    expectError(() => r.store.skip(r.code, r.ana.playerToken, 'a'), 409, 'not_voting');
+    expectError(() => r.store.join(r.code, 'Late'), 409, 'room_finished');
+  });
+
+  test('undo reopens the card that was open, with no votes, and keeps closed results', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
+    r.store.next(r.code, r.host.hostToken);
+    r.store.vote(r.code, r.ana.playerToken, 'b', 'like');
+    r.store.finish(r.code, r.host.hostToken);
+    const snap = r.store.undo(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'voting');
+    assert.equal(snap.index, 1);
+    assert.equal(snap.lastResult, null);
+    assert.deepEqual(Object.keys(snap.results), ['a']);
+    assert.deepEqual(snap.currentVoters, []);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, null);
+    // Voting continues normally from there, and a second undo reopens the previous closed card.
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'b', 'nope');
+    assert.equal(r.store.snapshot(r.code).index, 2);
+    assert.equal(r.store.undo(r.code, r.host.hostToken).index, 1);
+  });
+
+  test('undo right after finishing on the first card reopens it', () => {
+    const r = votingRoom();
+    r.store.finish(r.code, r.host.hostToken);
+    const snap = r.store.undo(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'voting');
+    assert.equal(snap.index, 0);
+  });
+
+  test('undo after an early finish requires the host', () => {
+    const r = votingRoom();
+    r.store.finish(r.code, r.host.hostToken);
+    expectError(() => r.store.undo(r.code, r.bob.playerToken), 403, 'not_host');
+    assert.equal(r.store.snapshot(r.code).phase, 'finished');
+  });
+});
+
 describe('kick', () => {
   test('removes the player, drops their current vote and bumps the version', () => {
     const r = votingRoom();

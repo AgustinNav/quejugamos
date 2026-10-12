@@ -213,6 +213,55 @@ describe('full flow', () => {
     assert.ok(!srv.logs.some((l) => JSON.parse(l).event === 'card_closed' && JSON.parse(l).roomCode === room.code));
   });
 
+  test('finish: host ends voting early, SSE gets the finished snapshot, undo reopens the open card', async () => {
+    const room = await createRoom('Agus');
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const deck: string[] = started.body.deck;
+    assert.ok(deck.length >= 3, 'the test needs at least 3 cards');
+    for (const gameId of deck.slice(0, 2)) {
+      await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId, vote: 'like' }, room.playerToken);
+      await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId, vote: 'nope' }, ana.playerToken);
+    }
+    await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: deck[2], vote: 'like' }, ana.playerToken);
+    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    sseClients.push(sse);
+    await sse.waitFor((e) => e.event === 'state');
+
+    const notHost = await api(base, 'POST', `/api/rooms/${room.code}/finish`, {}, ana.playerToken);
+    assert.equal(notHost.status, 403);
+    assert.equal(notHost.body.error, 'not_host');
+
+    const finished = await api(base, 'POST', `/api/rooms/${room.code}/finish`, {}, room.hostToken);
+    assert.equal(finished.status, 200);
+    assert.equal(finished.body.phase, 'finished');
+    assert.equal(finished.body.index, 2);
+    assert.equal(finished.body.lastResult, null);
+    assert.deepEqual(Object.keys(finished.body.results).sort(), deck.slice(0, 2).sort());
+    assert.equal(finished.body.votes[deck[2]], undefined, 'the discarded card must not leak its votes');
+    const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === finished.body.version);
+    assert.deepEqual(JSON.parse(event.data), finished.body);
+
+    const twice = await api(base, 'POST', `/api/rooms/${room.code}/finish`, {}, room.hostToken);
+    assert.equal(twice.status, 409);
+    assert.equal(twice.body.error, 'not_voting');
+
+    const undo = await api(base, 'POST', `/api/rooms/${room.code}/undo`, {}, room.hostToken);
+    assert.equal(undo.status, 200);
+    assert.equal(undo.body.phase, 'voting');
+    assert.equal(undo.body.index, 2);
+    assert.deepEqual(undo.body.currentVoters, []);
+    assert.equal(Object.keys(undo.body.results).length, 2);
+
+    const logs = srv.logs.map((l) => JSON.parse(l)).filter((l) => l.roomCode === room.code);
+    const log = logs.find((l) => l.event === 'game_finished_early');
+    assert.deepEqual(log, { severity: 'INFO', event: 'game_finished_early', roomCode: room.code, closedCards: 2, deckSize: deck.length });
+    const reopened = logs.find((l) => l.event === 'card_reopened');
+    assert.equal(reopened.afterEarlyFinish, true);
+    assert.equal(reopened.gameId, deck[2]);
+    for (const l of logs) assert.ok(!JSON.stringify(l).includes('Ana') && !JSON.stringify(l).includes('Agus'), 'names must not be logged');
+  });
+
   test('start: excludeGameIds leaves those games out and is not echoed in the snapshot', async () => {
     const room = await createRoom();
     const all = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
@@ -308,7 +357,7 @@ describe('full flow', () => {
 describe('malformed input never kills the process', () => {
   afterEach(assertAlive);
 
-  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick', 'skip'];
+  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick', 'skip', 'finish'];
   // start accepts a bigger body (excludeGameIds), so its "too large" case has to be bigger.
   const OVERSIZED = (action: string) => (action === 'start' ? 17 * 1024 : 2048);
 
@@ -387,6 +436,28 @@ describe('malformed input never kills the process', () => {
     const wrong = await api(base, 'POST', path, { gameId: 'not-a-game' }, room.playerToken);
     assert.equal(wrong.status, 409);
     assert.equal(wrong.body.error, 'not_current_game');
+  });
+
+  test('finish: lobby, non-host, finished, odd bodies and GET', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const path = `/api/rooms/${room.code}/finish`;
+    const lobby = await api(base, 'POST', path, {}, room.hostToken);
+    assert.equal(lobby.status, 409);
+    assert.equal(lobby.body.error, 'not_voting');
+    await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const notHost = await api(base, 'POST', path, {}, ana.playerToken);
+    assert.equal(notHost.status, 403);
+    assert.equal(notHost.body.error, 'not_host');
+    assert.equal((await api(base, 'GET', path)).status, 405);
+    assert.equal((await rawPost(base, path, '{"', 'application/json', room.hostToken)).status, 400);
+    assert.equal((await rawPost(base, path, '{}', 'application/json', 'x'.repeat(300))).status, 401);
+    assert.equal((await api(base, 'GET', `/api/rooms/${room.code}`)).body.phase, 'voting');
+    // The body is ignored: any valid JSON finishes, like next/undo.
+    assert.equal((await api(base, 'POST', path, [1, 2], room.hostToken)).status, 200);
+    const again = await api(base, 'POST', path, {}, room.hostToken);
+    assert.equal(again.status, 409);
+    assert.equal(again.body.error, 'not_voting');
   });
 
   test('start: malformed excludeGameIds is a 400 invalid_filters', async () => {

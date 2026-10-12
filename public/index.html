@@ -145,6 +145,10 @@
       <p class="steam-desc" id="gameSteamDesc"></p>
       <div class="links" id="gameLinks"></div>
       <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
+      <div class="finish-row">
+        <button class="btn ghost" type="button" id="partialRankingBtn" aria-haspopup="dialog">📊 Ranking parcial</button>
+        <button class="btn ghost finish-btn" type="button" id="finishBtn" title="Terminar y ver ranking (F)">🏁 Terminar y ver ranking</button>
+      </div>
 
       <section class="voters host-only" aria-labelledby="votersTitle">
         <h3 id="votersTitle">¿Quién votó? <span class="count" id="votersCount"></span></h3>
@@ -171,6 +175,7 @@
     <section class="panel results">
       <div class="results-head">
         <h2>🏆 Ranking</h2>
+        <button class="btn ghost resume-voting-btn" type="button" id="resumeVotingBtn" hidden>↶ Seguir votando</button>
         <a class="btn ghost" href="/" id="newRoomLink">Nueva sala</a>
       </div>
       <p class="muted" id="resultsNote"></p>
@@ -223,5 +228,16 @@
 
   <div class="toast" id="toast" role="alert" hidden></div>
   <p class="sr-only" id="announcer" aria-live="assertive"></p>
+
+  <dialog class="ranking-sheet" id="rankingSheet" aria-modal="true" aria-labelledby="rankingSheetTitle">
+    <div class="ranking-sheet-body">
+      <div class="ranking-sheet-head">
+        <h2 id="rankingSheetTitle">📊 Ranking parcial</h2>
+        <button class="btn primary" type="button" id="rankingSheetClose">Volver a votar</button>
+      </div>
+      <p class="muted" id="rankingSheetNote"></p>
+      <ol class="ranking" id="partialRanking"></ol>
+    </div>
+  </dialog>
 </body>
 </html>
