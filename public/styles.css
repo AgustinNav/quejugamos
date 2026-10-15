@@ -578,3 +578,26 @@ body.is-phone .links .link-btn { min-height: 52px; }
   .nope-overlay.play { animation-duration: 1.5s !important; }
   .links .link-btn { transition: none !important; }
 }
+
+/* ===== Ranking UX: sort/filter bar + export ===== */
+.rank-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 16px; }
+.rank-tools[hidden], .rank-export[hidden], .rank-filtered-empty[hidden] { display: none; }
+.rank-sort { display: flex; align-items: center; gap: 8px; }
+.rank-sort label { color: var(--muted); font-size: 14px; }
+.rank-sort select {
+  font: inherit; min-height: 48px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+}
+.rank-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.rank-filters .toggle { min-height: 48px; }
+.rank-count { margin: 0; font-size: 14px; }
+.rank-count:empty { display: none; }
+.rank-filtered-empty { margin-top: 16px; padding: 18px; text-align: center; border-radius: 14px; border: 1px dashed var(--border); }
+.rank-filtered-empty p { margin: 0 0 10px; color: var(--muted); }
+.rank-filtered-empty .btn, .rank-export .btn { min-height: 48px; }
+.rank-export { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+@media (max-width: 960px) {
+  .rank-sort { width: 100%; }
+  .rank-sort select { flex: 1; }
+  .rank-export .btn { flex: 1 1 100%; }
+}
