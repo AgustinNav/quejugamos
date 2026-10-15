@@ -11,6 +11,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { GAMES } from '../public/games.js';
+import { parsePcRequirements } from '../src/pc-requirements.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -440,6 +441,7 @@ function toGameDetails(data) {
     reviews: data.recommendations?.total || null,
     metacritic: data.metacritic?.score || null,
     releaseDate: data.release_date?.date || null,
+    pcRequirements: parsePcRequirements(data.pc_requirements),
   };
 }
 

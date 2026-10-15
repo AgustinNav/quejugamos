@@ -1,6 +1,6 @@
 // Voting screen. Host and phone share this DOM; body.is-host / body.is-phone switch the layout.
-import { $, esc, showScreen, announce, kickButton } from '../dom.js';
-import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks } from '../catalog.js';
+import { $, esc, showScreen, announce, kickButton, toast } from '../dom.js';
+import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks, dealInfo, pcRequirements } from '../catalog.js';
 import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
 import { renderUnder } from '../stack.js';
@@ -9,6 +9,7 @@ const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
 
 let renderedGameId = null;
 let matchTimer = null;
+let rejectTimer = null;
 
 export const currentGameId = (state) => state.deck[state.index] ?? null;
 
@@ -34,6 +35,7 @@ export function forgetRenderedGame() {
 function showGame(id, state) {
   renderedGameId = id;
   const game = gameOrStub(id);
+  $('gameReqs').open = false; // closed by default on every new card
   renderInfo(game);
   renderMedia(game);
   // Paint immediately with static data, then again once Steam details arrive.
@@ -66,8 +68,50 @@ function renderInfo(game) {
   const d = getDetails(game.id) || {};
   $('gameSteamDesc').textContent = d.shortDescription ? `Steam: “${d.shortDescription}”` : '';
   $('gameLinks').innerHTML = storeLinks(game)
-    .map(([label, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+    .map(([label, url, kind, icon]) => linkButton(label, url, kind, icon))
     .join('');
+  renderDeal(game);
+  renderRequirements(game);
+}
+
+// Real <a> buttons; label/url are escaped, kind/icon come from catalog.js constants.
+function linkButton(label, url, kind, icon) {
+  return `<a class="link-btn ${kind}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">`
+    + `<span class="link-icon" aria-hidden="true">${icon}</span><span>${esc(label)}</span></a>`;
+}
+
+// The badge sits on the media (visible even while a trailer plays); the struck-through old price is in priceInfo.
+function renderDeal(game) {
+  const badge = $('dealBadge');
+  const deal = dealInfo(game);
+  badge.hidden = !deal;
+  badge.classList.toggle('free', Boolean(deal?.free));
+  badge.textContent = deal ? (deal.free ? 'GRATIS' : `🔥 -${deal.off}%`) : '';
+}
+
+function renderRequirements(game) {
+  const reqs = pcRequirements(game);
+  $('gameReqs').hidden = !reqs;
+  if (!reqs) return $('gameReqsBody').replaceChildren();
+  const groups = [['Mínimos', reqs.minimum], ['Recomendados', reqs.recommended]]
+    .filter(([, lines]) => lines.length)
+    .map(([title, lines]) => reqGroup(title, lines));
+  $('gameReqsBody').replaceChildren(...groups);
+}
+
+function reqGroup(title, lines) {
+  const group = document.createElement('div');
+  group.className = 'req-group';
+  const heading = document.createElement('h4');
+  heading.textContent = title;
+  const list = document.createElement('ul');
+  list.append(...lines.map((line) => {
+    const li = document.createElement('li');
+    li.textContent = line;
+    return li;
+  }));
+  group.append(heading, list);
+  return group;
 }
 
 function metaPills(game) {
@@ -135,9 +179,25 @@ export function showMatch(gameName) {
   matchTimer = setTimeout(() => { overlay.hidden = true; }, 1800);
 }
 
+/** Everyone who voted said nope (and the card was not ranked apart as already played). */
+export const isRejectedByAll = (result) => result.likes === 0 && result.nopes > 0 && !result.playedOut;
+
+export function showRejected(gameName) {
+  const overlay = $('nopeOverlay');
+  $('nopeGame').textContent = gameName;
+  overlay.hidden = false;
+  overlay.classList.remove('play');
+  void overlay.offsetWidth; // restart the CSS animation
+  overlay.classList.add('play');
+  toast('Nadie lo quiere 💀'); // role=alert: also what screen readers get
+  clearTimeout(rejectTimer);
+  rejectTimer = setTimeout(() => { overlay.hidden = true; }, 1500);
+}
+
 export function announceResult(result) {
   const game = gameOrStub(result.gameId);
   if (result.match) return showMatch(game.name);
+  if (isRejectedByAll(result)) return showRejected(game.name);
   const played = result.played ? `, ${result.played} ya lo jugaron` : '';
   announce(`${game.name}: ${result.likes} like, ${result.nopes} nope${played}. Pasamos al siguiente.`);
 }

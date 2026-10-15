@@ -70,12 +70,30 @@ export function storeUrl(game) {
   return game.steamId ? `https://store.steampowered.com/app/${game.steamId}` : game.storeUrl;
 }
 
+/** [label, url, kind, icon]: `kind` picks the button style (primary store CTA vs secondary helpers). */
 export function storeLinks(game) {
   const q = encodeURIComponent(game.name);
   const links = [];
-  if (game.steamId) links.push(['🛒 Steam', storeUrl(game)]);
-  if (game.storeUrl) links.push(['🛒 Tienda oficial', game.storeUrl]);
-  links.push(['▶ Gameplay', `https://www.youtube.com/results?search_query=${q}+gameplay+coop`]);
-  links.push(['💸 Precios', `https://isthereanydeal.com/search/?q=${q}`]);
+  if (game.steamId) links.push(['Steam', storeUrl(game), 'store steam', '🛒']);
+  if (game.storeUrl) links.push(['Tienda oficial', game.storeUrl, 'store', '🛒']);
+  links.push(['Gameplay', `https://www.youtube.com/results?search_query=${q}+gameplay+coop`, 'gameplay', '▶']);
+  links.push(['Precios', `https://isthereanydeal.com/search/?q=${q}`, 'prices', '💸']);
   return links;
+}
+
+/** What the deal badge shows: `{ free: true }`, `{ off: 75 }` or null. Numbers only, never markup. */
+export function dealInfo(game) {
+  const d = details.get(game.id);
+  if (d?.isFree || game.priceLabel === 'Gratis') return { free: true };
+  const off = Number(d?.price?.discount_percent);
+  return off > 0 && off <= 100 ? { off: Math.round(off) } : null;
+}
+
+/** Plain-text requirement lines, or null when the card has nothing to show (old cache, console-only game). */
+export function pcRequirements(game) {
+  const reqs = details.get(game.id)?.pcRequirements;
+  if (!reqs || typeof reqs !== 'object') return null;
+  const clean = (lines) => (Array.isArray(lines) ? lines.filter((l) => typeof l === 'string' && l).slice(0, 12) : []);
+  const result = { minimum: clean(reqs.minimum), recommended: clean(reqs.recommended) };
+  return result.minimum.length || result.recommended.length ? result : null;
 }

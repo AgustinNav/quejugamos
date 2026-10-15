@@ -111,12 +111,16 @@ Measurement only: they never change the response, are not stored in the room and
   "movies": Movie[],            // playable trailers, highlighted first, max 6 (may be [])
   "movie": Movie | null,        // = movies[0]; kept for older clients
   "screenshots": string[],      // full-size URLs, max 12
-  "screenshotThumbs": string[]  // same order/length as screenshots (Steam thumbnails)
+  "screenshotThumbs": string[], // same order/length as screenshots (Steam thumbnails)
+  "pcRequirements": { "minimum": string[], "recommended": string[] } | null
+  // Plain-text lines parsed server-side from Steam's pc_requirements HTML (never HTML; max 12 lines of 200 chars
+  // per list; either list may be []). null = Steam has none (console/mobile-only). Labels follow l=spanish
+  // ("SO: ...", "Memoria: ..."). Cache entries from before this field are refetched, but a stale response may omit it.
 }
 // Movie = { "name": string, "poster": string | null, "hls": string | null, "mp4": string | null } — at least one of hls/mp4 is set
 ```
 
-Clients must tolerate a `stale: true` response from an older cache that has only `movie` and up to 4 `screenshots` (no `movies` / `screenshotThumbs`): fall back to `[movie]` and to the full-size URLs.
+Clients must tolerate a `stale: true` response from an older cache that has only `movie` and up to 4 `screenshots` (no `movies` / `screenshotThumbs`): fall back to `[movie]` and to the full-size URLs, and treat a missing `pcRequirements` as `null`.
 
 ## Rules
 

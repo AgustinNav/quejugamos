@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { priceFromDetails } from './deck.ts';
 import type { CatalogGame } from './deck.ts';
 import type { Logger } from './log.ts';
+import { parsePcRequirements } from './pc-requirements.ts';
 import { UpstreamQueue } from './upstream-queue.ts';
 import type { Priority } from './upstream-queue.ts';
 
@@ -81,12 +82,13 @@ function toGameDetails(data: any): GameDetails {
     reviews: data.recommendations?.total || null,
     metacritic: data.metacritic?.score || null,
     releaseDate: data.release_date?.date || null,
+    pcRequirements: parsePcRequirements(data.pc_requirements),
   };
 }
 
-/** Entries cached by older versions lack the gallery fields: they count as a miss (still usable as stale). */
+/** Entries cached by older versions lack the gallery / requirements fields: they count as a miss (still usable as stale). */
 function hasCurrentShape(details: GameDetails | undefined): boolean {
-  return Array.isArray(details?.movies) && Array.isArray(details?.screenshotThumbs);
+  return Array.isArray(details?.movies) && Array.isArray(details?.screenshotThumbs) && details?.pcRequirements !== undefined;
 }
 
 export class SteamClient {
