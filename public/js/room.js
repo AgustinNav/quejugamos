@@ -1,18 +1,21 @@
 // Room lifecycle: initial fetch, SSE connection, snapshot versioning and rendering by phase.
 import { $, setLoading, toast } from './dom.js';
-import { api, openEvents } from './api.js';
+import { ApiError, api, isMemberSnapshot, openEvents } from './api.js';
 import { loadSession, saveSession, clearSession } from './store.js';
+import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
-import { flyOut, playedOut, resetCard } from './swipe.js';
+import { flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
 import { syncPlayed } from './played.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
 import { renderVoting, forgetRenderedGame, announceResult, currentGameId, gameName } from './views/voting.js';
 import { renderResults } from './views/results.js';
+import { closeRankingSheet, syncRankingSheet } from './ranking-sheet.js';
 
 const RECONNECT_DELAY_MS = 3000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
 
 let active = null;
 
@@ -23,6 +26,9 @@ export function enterRoom(code) {
     code, session: null, isHost: false, state: null, es: null, busy: false, disposed: false,
     // myVote: own vote on the open card ({ gameId, vote }); snapshots only say who voted, not what.
     pendingVote: null, myVote: null, retryTimer: null, stopKeepAlive: startKeepAlive(code), onVisible: null,
+    // Stream reconnection: connectAttempt drops stale ticket requests, retries drives the backoff,
+    // authRetries allows one re-ticket after a 401 before treating the session as gone.
+    connectAttempt: 0, retries: 0, authRetries: 0,
   };
   room.onVisible = () => { if (document.visibilityState === 'visible') resync(room); };
   document.addEventListener('visibilitychange', room.onVisible);
@@ -35,6 +41,7 @@ export function enterRoom(code) {
 // Stops every async path (SSE, retries, keep-alive, visibility) so nothing repaints this room.
 function disposeRoom(room) {
   room.disposed = true;
+  closeRankingSheet({ resume: false });
   room.stopKeepAlive();
   room.es?.close();
   clearTimeout(room.retryTimer);
@@ -44,6 +51,7 @@ function disposeRoom(room) {
 function leaveRoom(room) {
   disposeRoom(room);
   resetMedia();
+  resetCard();
   forgetRenderedGame();
   setConnBadge(false);
   $('roomBadge').hidden = true;
@@ -53,17 +61,20 @@ function leaveRoom(room) {
 
 async function boot(room) {
   setLoading(true, 'Entrando a la sala…');
+  setSession(room, loadSession(room.code));
   let snapshot;
   try {
-    snapshot = await api.getRoom(room.code);
+    snapshot = await api.getRoom(room.code, room.session?.playerToken);
   } catch (err) {
     if (!room.disposed) failRoom(room, err.code);
     return;
   }
   if (room.disposed) return;
-  setSession(room, loadSession(room.code));
-  if (room.session && !snapshot.players.some((p) => p.id === room.session.playerId)) forgetSession(room);
-  if (!room.session) return showJoinOrResults(room, snapshot);
+  // Without a valid token of this room the server only sends the public view (no names).
+  if (!isMemberSnapshot(snapshot) || isKicked(room, snapshot)) {
+    forgetSession(room);
+    return showJoinOrFinished(room, snapshot);
+  }
   await loadMyVote(room);
   if (room.disposed) return;
   applySnapshot(room, snapshot);
@@ -108,11 +119,10 @@ export function failRoom(room, code) {
 
 const isKicked = (room, snapshot) => Boolean(room.session && !snapshot.players.some((p) => p.id === room.session.playerId));
 
-function showJoinOrResults(room, snapshot) {
-  if (snapshot.phase === 'finished') {
-    return renderResults(snapshot, 'Esta votación ya terminó. Así quedó el ranking:');
-  }
-  showJoin(room.code, snapshot, (name) => joinRoom(room, name));
+// The ranking (names, votes) is only for members: outsiders of a finished room get the notice.
+function showJoinOrFinished(room, publicView) {
+  if (publicView.phase === 'finished') return failRoom(room, 'room_finished');
+  showJoin(room.code, publicView, (name) => joinRoom(room, name));
 }
 
 async function joinRoom(room, name) {
@@ -120,6 +130,7 @@ async function joinRoom(room, name) {
     const { playerToken, playerId } = await api.join(room.code, name);
     const session = { playerToken, playerId };
     saveSession(room.code, session);
+    markGuest();
     setSession(room, session);
     setLoading(true, 'Entrando a la sala…');
     connect(room); // the first SSE event carries the full snapshot
@@ -131,14 +142,48 @@ async function joinRoom(room, name) {
 
 // ---------- live updates ----------
 
-function connect(room) {
-  room.es?.close();
-  const es = openEvents(room.code);
+// Every connect (first one and each reconnect) trades the token for a fresh single-use ticket:
+// the token never goes in a URL.
+async function connect(room) {
+  closeStream(room);
+  const attempt = ++room.connectAttempt;
+  let ticket;
+  try {
+    ({ ticket } = await api.streamTicket(room.code, room.session.playerToken));
+  } catch (err) {
+    if (!room.disposed && attempt === room.connectAttempt) onTicketError(room, err.code);
+    return;
+  }
+  if (room.disposed || attempt !== room.connectAttempt) return;
+  const es = openEvents(room.code, ticket);
   room.es = es;
-  es.addEventListener('open', () => setConnBadge(false));
+  es.addEventListener('open', () => onStreamOpen(room, es));
   es.addEventListener('state', (e) => onStateEvent(room, e));
   es.addEventListener('closed', () => failRoom(room, 'closed'));
   es.addEventListener('error', () => onStreamError(room, es));
+}
+
+function closeStream(room) {
+  room.es?.close();
+  room.es = null;
+}
+
+function onStreamOpen(room, es) {
+  if (es !== room.es) return;
+  room.retries = 0;
+  room.authRetries = 0;
+  setConnBadge(false);
+}
+
+function onTicketError(room, code) {
+  if (code === 'room_not_found') return failRoom(room, 'closed');
+  if (code === 'unauthorized') {
+    room.authRetries += 1;
+    if (room.authRetries > 1) return failRoom(room, 'unauthorized');
+    return void connect(room);
+  }
+  setConnBadge(true);
+  scheduleReconnect(room);
 }
 
 function onStateEvent(room, event) {
@@ -149,37 +194,49 @@ function onStateEvent(room, event) {
   }
 }
 
-// EventSource retries by itself while CONNECTING; if it gives up (CLOSED) we retry by hand
-// after checking the room still exists.
+// Native auto-reconnect would reuse the URL, whose ticket is already spent (401). We take over:
+// close the stream and reconnect by hand (room check + fresh ticket) with backoff.
 function onStreamError(room, es) {
   if (room.disposed || es !== room.es) return;
+  closeStream(room);
   setConnBadge(true);
-  if (es.readyState === EventSource.CLOSED) scheduleReconnect(room);
+  scheduleReconnect(room);
 }
 
 function scheduleReconnect(room) {
   clearTimeout(room.retryTimer);
-  room.retryTimer = setTimeout(() => reconnect(room), RECONNECT_DELAY_MS);
+  const delay = Math.min(RECONNECT_DELAY_MS * 2 ** room.retries, MAX_RECONNECT_DELAY_MS);
+  room.retries += 1;
+  room.retryTimer = setTimeout(() => reconnect(room), delay);
 }
 
 async function reconnect(room) {
   clearTimeout(room.retryTimer);
   if (room.disposed) return;
   try {
-    applySnapshot(room, await api.getRoom(room.code));
-    connect(room);
+    applySnapshot(room, await fetchMemberSnapshot(room));
+    if (!room.disposed) connect(room);
   } catch (err) {
     if (err.code === 'room_not_found') return failRoom(room, 'closed');
+    if (err.code === 'kicked') return failRoom(room, 'kicked');
     scheduleReconnect(room);
   }
+}
+
+// A public view for someone holding a session means the token no longer belongs to the room.
+async function fetchMemberSnapshot(room) {
+  const data = await api.getRoom(room.code, room.session.playerToken);
+  if (!isMemberSnapshot(data)) throw new ApiError(401, 'kicked');
+  return data;
 }
 
 /** Refetches the snapshot; used when the stream may have missed events (frozen phone, stale vote). */
 export async function refreshRoom(room) {
   try {
-    applySnapshot(room, await api.getRoom(room.code));
+    applySnapshot(room, await fetchMemberSnapshot(room));
   } catch (err) {
     if (err.code === 'room_not_found') failRoom(room, 'closed');
+    else if (err.code === 'kicked') failRoom(room, 'kicked');
     else console.warn('[room] refresh failed:', err.code);
   }
 }
@@ -227,29 +284,43 @@ function render(room, prev) {
   renderPhase(room);
 }
 
+// The card leaves (thrown, or shrunk if skipped as played), the next game is painted into it while
+// hidden over the identical card underneath, then it fades in. Snapshots arriving meanwhile are
+// kept (room.busy) and rendered at the end.
 async function animateClose(room) {
   room.busy = true;
-  const result = room.state.lastResult;
+  await leaveCard(room.state.lastResult);
+  if (room.disposed) return void (room.busy = false);
+  prepareNextCard();
+  paint(room);
+  await revealNextCard();
+  room.busy = false;
+  if (!room.disposed) renderPhase(room);
+}
+
+function leaveCard(result) {
   if (result.played) {
     // Skipped as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
     toast(`«${gameName(result.gameId)}» — ya lo jugaron, salteado`);
-    await playedOut();
-  } else {
-    announceResult(result);
-    await flyOut(result.likes > result.nopes ? 'right' : 'left');
+    return playedOut();
   }
-  room.busy = false;
-  if (room.disposed) return;
-  resetCard();
-  renderPhase(room); // renders the latest snapshot, even if more arrived mid-animation
+  announceResult(result);
+  return flyOut(result.likes > result.nopes ? 'right' : 'left');
 }
 
 export function renderPhase(room) {
-  if (room.busy || room.disposed || !room.state) return;
+  if (!room.busy) paint(room);
+}
+
+function paint(room) {
+  if (room.disposed || !room.state) return;
   const { phase, index, deck } = room.state;
   $('progress').hidden = phase !== 'voting';
   $('progress').textContent = `${Math.min(index + 1, deck.length)} / ${deck.length}`;
   if (phase !== 'voting') resetMedia();
+  // An early finish undone reopens the same card: it must render (and load its trailer) again.
+  if (phase !== 'voting') forgetRenderedGame();
+  syncRankingSheet(room.state);
   if (phase === 'lobby') return room.isHost ? renderHostLobby(room) : renderPlayerLobby(room);
   if (phase === 'voting') return renderVoting(room, myVote(room));
   renderResults(room.state);

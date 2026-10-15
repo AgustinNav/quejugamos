@@ -5,15 +5,18 @@ import { errorMessage } from './errors.js';
 import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
 import { currentGameId, gameName } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
+import { bindRankingSheet } from './ranking-sheet.js';
 import { bindPlayedHint, excludedGameIds } from './played.js';
 import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
-import { bindSwipe } from './swipe.js';
+import { bindSwipe, isCardOut, returnCard } from './swipe.js';
+import { closesCard } from './gesture.js';
 
 // The UI was behind the server (e.g. the SSE stream died while the phone was locked).
 const STALE_STATE_ERRORS = new Set(['not_current_game', 'not_voting']);
 
+// isCardOut: the own swipe threw the card and its vote is still in flight.
 function canVote(room) {
-  return Boolean(room && !room.busy && room.session && room.state?.phase === 'voting');
+  return Boolean(room && !room.busy && room.session && room.state?.phase === 'voting' && !isCardOut());
 }
 
 async function handleActionError(room, err) {
@@ -46,7 +49,20 @@ export async function castVote(vote) {
     room.pendingVote = null;
     renderPhase(room);
     handleActionError(room, err);
+  } finally {
+    // A thrown card whose vote did not close it (error, or someone joined meanwhile) comes back.
+    // When it did close, the room's close animation is running (busy) and owns the card.
+    if (!room.busy && !room.disposed) returnCard();
   }
+}
+
+// Swipe release: votes, and tells the card to leave only if this vote is the last one missing.
+function swipeVote(vote) {
+  const room = activeRoom();
+  if (!canVote(room) || myVote(room) === vote) return 'stay';
+  const leaves = closesCard(room.state, room.session.playerId);
+  castVote(vote);
+  return leaves ? 'leave' : 'stay';
 }
 
 async function hostAction(call) {
@@ -61,6 +77,13 @@ async function hostAction(call) {
 
 export const forceNext = () => hostAction(api.next);
 export const undo = () => hostAction(api.undo);
+
+// Ends voting for everyone; the open card is discarded. Undo right after brings it back.
+export function finishVoting() {
+  if (!activeRoom()?.isHost) return;
+  if (!window.confirm('¿Terminar la votación para todos? Se muestra el ranking con lo votado hasta ahora.')) return;
+  hostAction(api.finish);
+}
 
 // "Ya lo jugamos": any player skips the open card for the whole room (it never counts as a match).
 export async function skipCurrentGame() {
@@ -78,6 +101,23 @@ export async function skipCurrentGame() {
   } finally {
     room.skipping = false;
     $('playedBtn').disabled = false;
+  }
+}
+
+// Host deletes the room for everyone: names and votes are gone from the server right away.
+export async function closeRoom() {
+  const room = activeRoom();
+  if (!room?.isHost || room.closing) return;
+  if (!window.confirm('¿Cerrar la sala para todos? Se borran los nombres y los votos.')) return;
+  room.closing = true;
+  try {
+    await api.close(room.code, room.session.hostToken);
+    failRoom(room, 'closed'); // the `closed` SSE event may also arrive: failRoom is idempotent
+  } catch (err) {
+    if (err.code === 'room_not_found') return failRoom(room, 'closed');
+    handleActionError(room, err);
+  } finally {
+    room.closing = false;
   }
 }
 
@@ -121,7 +161,7 @@ const KEYS = {
   g: openCardGallery,
   G: openCardGallery,
 };
-const HOST_KEYS = { n: forceNext, N: forceNext, z: undo, Z: undo, Backspace: undo };
+const HOST_KEYS = { n: forceNext, N: forceNext, z: undo, Z: undo, Backspace: undo, f: finishVoting, F: finishVoting };
 
 function onKeydown(e) {
   const room = activeRoom();
@@ -139,9 +179,13 @@ export function bindActions() {
   $('nextBtn').addEventListener('click', forceNext);
   $('undoBtn').addEventListener('click', undo);
   $('playedBtn').addEventListener('click', skipCurrentGame);
+  $('finishBtn').addEventListener('click', finishVoting);
+  $('resumeVotingBtn').addEventListener('click', undo);
+  bindRankingSheet(() => activeRoom()?.state);
+  document.querySelectorAll('[data-close-room]').forEach((btn) => btn.addEventListener('click', closeRoom));
   bindPlayedHint();
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);
   document.addEventListener('keydown', onKeydown);
-  bindSwipe((vote) => castVote(vote), () => canVote(activeRoom()));
+  bindSwipe({ onSwipe: swipeVote, canSwipe: () => canVote(activeRoom()) });
 }

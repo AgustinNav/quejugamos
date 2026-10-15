@@ -10,6 +10,8 @@ export type SseHubOptions = {
   // A client that stops reading makes writes pile up in our process: past this, it is dropped.
   maxBufferedBytes?: number;
   pingMs?: number;
+  // Called with the room's live stream count after every connect/disconnect (presence-based cleanup).
+  onPresence?: (code: string, liveConnections: number) => void;
 };
 
 const SSE_HEADERS = {
@@ -32,12 +34,14 @@ export class SseHub {
   private readonly maxPerIp: number;
   private readonly maxBufferedBytes: number;
   private readonly pingTimer: NodeJS.Timeout;
+  private readonly onPresence: (code: string, liveConnections: number) => void;
 
   constructor(options: SseHubOptions = {}) {
     this.maxPerRoom = options.maxPerRoom ?? 50;
     this.maxTotal = options.maxTotal ?? 2000;
     this.maxPerIp = options.maxPerIp ?? 20;
     this.maxBufferedBytes = options.maxBufferedBytes ?? 64 * 1024;
+    this.onPresence = options.onPresence ?? (() => {});
     this.pingTimer = setInterval(() => this.pingAll(), options.pingMs ?? 25_000);
     this.pingTimer.unref();
   }
@@ -57,6 +61,7 @@ export class SseHub {
     res.writeHead(200, SSE_HEADERS);
     res.write(stateEvent(snapshot));
     res.on('close', () => this.disconnect(code, res));
+    this.onPresence(code, clients.size);
     return true;
   }
 
@@ -103,6 +108,7 @@ export class SseHub {
     const clients = this.rooms.get(code);
     if (!clients?.delete(res)) return;
     if (clients.size === 0) this.rooms.delete(code);
+    this.onPresence(code, clients.size);
     const ip = this.clientIps.get(res);
     this.clientIps.delete(res);
     if (ip === undefined) return;

@@ -6,11 +6,15 @@
   <title>¿Qué Jugamos?</title>
   <meta name="description" content="Elegí a qué jugar con tus amigos: cada uno vota desde su celu, swipe a la derecha o a la izquierda, y cuando a todos les gusta el mismo juego… ¡match!">
   <meta name="theme-color" content="#0e0f14">
+  <!-- The origin placeholders and the verification comment below are replaced by the server (src/seo.ts) from env vars. -->
+  <link rel="canonical" href="__PUBLIC_ORIGIN__/">
+  <!--__SITE_VERIFICATION__-->
   <meta property="og:type" content="website">
+  <meta property="og:url" content="__PUBLIC_ORIGIN__/">
   <meta property="og:site_name" content="¿Qué Jugamos?">
   <meta property="og:title" content="¿Qué Jugamos?">
   <meta property="og:description" content="Elegí a qué jugar con tus amigos: cada uno vota desde su celu y cuando a todos les gusta el mismo juego… ¡match! 💘">
-  <meta property="og:image" content="/og-image.png">
+  <meta property="og:image" content="__PUBLIC_ORIGIN__/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="¿Qué Jugamos?: votá con tus amigos a qué jugar">
@@ -18,7 +22,8 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="¿Qué Jugamos?">
   <meta name="twitter:description" content="Elegí a qué jugar con tus amigos: cada uno vota desde su celu y cuando a todos les gusta el mismo juego… ¡match! 💘">
-  <meta name="twitter:image" content="/og-image.png">
+  <meta name="twitter:image" content="__PUBLIC_ORIGIN__/og-image.png">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"¿Qué Jugamos?","url":"__PUBLIC_ORIGIN__/","applicationCategory":"GameApplication","operatingSystem":"Web","inLanguage":"es","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -103,6 +108,7 @@
       <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
       <p class="form-error" id="startError" role="alert"></p>
       <p class="played-hint" id="playedHint" hidden><span id="playedHintText"></span> · <button class="link-btn" type="button" id="playedResetBtn">Mostrar de nuevo</button></p>
+      <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
     </section>
   </main>
 
@@ -118,6 +124,13 @@
 
   <!-- VOTING (host and phone share the DOM, the layout changes by body class) -->
   <main class="screen" id="votingScreen" hidden>
+    <!-- Card stack: the open card over a preview of the next one (stack.js), same grid cell. The
+         card keeps its original indentation so this wrapper does not touch the media markup. -->
+    <div class="card-stack">
+    <div class="card-under" id="cardUnder" aria-hidden="true" hidden>
+      <div class="under-media"><img id="underImg" alt="" draggable="false" hidden></div>
+      <p class="under-name" id="underName"></p>
+    </div>
     <article class="card" id="card" aria-label="Juego actual">
       <div class="stamp like" aria-hidden="true">LIKE</div>
       <div class="stamp nope" aria-hidden="true">NOPE</div>
@@ -132,19 +145,29 @@
         </div>
       </div>
       <div class="shots" id="shots"></div>
-    </article>
-
-    <aside class="info panel">
-      <div class="title-row">
-        <h2 id="gameName"></h2>
-        <span class="price" id="gamePrice"></span>
+      <!-- The whole card (media + info) is one draggable unit, like a physical card. -->
+      <div class="card-body">
+        <div class="title-row">
+          <h2 id="gameName"></h2>
+          <span class="price" id="gamePrice"></span>
+        </div>
+        <div class="meta" id="gameMeta"></div>
+        <div class="tags" id="gameTags"></div>
+        <p class="pitch" id="gamePitch"></p>
+        <p class="steam-desc" id="gameSteamDesc"></p>
+        <div class="links" id="gameLinks"></div>
+        <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
       </div>
-      <div class="meta" id="gameMeta"></div>
-      <div class="tags" id="gameTags"></div>
-      <p class="pitch" id="gamePitch"></p>
-      <p class="steam-desc" id="gameSteamDesc"></p>
-      <div class="links" id="gameLinks"></div>
-      <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
+    </article>
+    </div>
+
+    <aside class="side panel">
+
+      <!-- Room-level actions (not about the current card), outside the draggable card and away from the vote bar. -->
+      <div class="finish-row">
+        <button class="btn ghost" type="button" id="partialRankingBtn" aria-haspopup="dialog">📊 Ranking parcial</button>
+        <button class="btn ghost finish-btn" type="button" id="finishBtn" title="Terminar y ver ranking (F)">🏁 Terminar y ver ranking</button>
+      </div>
 
       <section class="voters host-only" aria-labelledby="votersTitle">
         <h3 id="votersTitle">¿Quién votó? <span class="count" id="votersCount"></span></h3>
@@ -152,6 +175,7 @@
         <div class="host-controls">
           <button class="btn ghost" type="button" id="undoBtn" title="Deshacer (Z)">↶ Deshacer</button>
           <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
+          <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
         </div>
         <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
       </section>
@@ -171,7 +195,9 @@
     <section class="panel results">
       <div class="results-head">
         <h2>🏆 Ranking</h2>
+        <button class="btn ghost resume-voting-btn" type="button" id="resumeVotingBtn" hidden>↶ Seguir votando</button>
         <a class="btn ghost" href="/" id="newRoomLink">Nueva sala</a>
+        <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
       </div>
       <p class="muted" id="resultsNote"></p>
       <ol class="ranking" id="ranking"></ol>
@@ -209,6 +235,7 @@
     <div class="gallery-bar">
       <h2 class="gallery-title" id="galleryTitle"></h2>
       <span class="gallery-count" id="galleryCount" aria-live="polite"></span>
+      <input class="volume-slider gallery-volume" type="range" id="galleryVolume" min="0" max="100" step="5" value="0" aria-label="Volumen del trailer" title="Volumen (+ / −)" hidden>
       <button class="btn gallery-close" type="button" id="galleryClose" aria-label="Cerrar galería" title="Cerrar (Esc)">✕</button>
     </div>
     <div class="gallery-stage" id="galleryStage">
@@ -222,5 +249,16 @@
 
   <div class="toast" id="toast" role="alert" hidden></div>
   <p class="sr-only" id="announcer" aria-live="assertive"></p>
+
+  <dialog class="ranking-sheet" id="rankingSheet" aria-modal="true" aria-labelledby="rankingSheetTitle">
+    <div class="ranking-sheet-body">
+      <div class="ranking-sheet-head">
+        <h2 id="rankingSheetTitle">📊 Ranking parcial</h2>
+        <button class="btn primary" type="button" id="rankingSheetClose">Volver a votar</button>
+      </div>
+      <p class="muted" id="rankingSheetNote"></p>
+      <ol class="ranking" id="partialRanking"></ol>
+    </div>
+  </dialog>
 </body>
 </html>

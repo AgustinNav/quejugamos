@@ -2,7 +2,7 @@
 // selected item plus the thumbnails: friends are on mobile data, so no video preloading.
 import { $ } from './dom.js';
 import { attachMovie, playQuietly } from './player.js';
-import { applyAudio, onAudioChange, stepVolume, syncFromVideo, toggleMute } from './audio.js';
+import { applyAudio, audioState, onAudioChange, setVolume, stepVolume, syncFromVideo, toggleMute } from './audio.js';
 
 const SWIPE_MIN_PX = 50;
 // Native video controls sit at the bottom: a horizontal drag there is scrubbing, not a swipe.
@@ -45,7 +45,7 @@ export function openGallery({ title, items: list, start = 0, onClose: closeCallb
   dialog.showModal();
   document.body.classList.add('gallery-open');
   window.addEventListener('keydown', onKeydown, true);
-  unsubscribeAudio = onAudioChange(() => applyAudio($('galleryVideo')));
+  unsubscribeAudio = onAudioChange(renderGalleryAudio);
   select(start);
   $('galleryClose').focus();
 }
@@ -125,6 +125,17 @@ function select(i) {
     img.alt = item.label;
   }
   renderPosition(item);
+  renderGalleryAudio(audioState());
+}
+
+// Our own slider, because native controls have no volume on phones (and iOS ignores it anyway).
+function renderGalleryAudio({ muted, volume, adjustable }) {
+  const slider = $('galleryVolume');
+  const percent = Math.round(volume * 100);
+  slider.hidden = items[index]?.kind !== 'movie' || !adjustable;
+  slider.value = String(muted ? 0 : percent);
+  slider.setAttribute('aria-valuetext', muted ? 'Silenciado' : `Volumen ${percent}%`);
+  applyAudio($('galleryVideo'));
 }
 
 function renderPosition(item) {
@@ -157,6 +168,7 @@ const KEYS = {
 function onKeydown(e) {
   e.stopImmediatePropagation();
   if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target === $('galleryVolume') && e.key.startsWith('Arrow')) return; // arrows move the slider
   const action = KEYS[e.key];
   if (!action) return;
   e.preventDefault();
@@ -201,5 +213,8 @@ export function bindGallery() {
     if (button) select(Number(button.dataset.index));
   });
   $('galleryVideo').addEventListener('volumechange', (e) => syncFromVideo(e.target));
+  $('galleryVolume').addEventListener('input', (e) => setVolume(Number(e.target.value) / 100));
+  // Same as the card: iOS may pause a video unmuted mid-drag; the release is a gesture.
+  $('galleryVolume').addEventListener('change', () => { if (player && $('galleryVideo').paused) playQuietly($('galleryVideo')); });
   bindSwipe($('galleryStage'));
 }

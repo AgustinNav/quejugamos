@@ -16,6 +16,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT) || 3100;
 const HOST = process.env.HOST || '127.0.0.1';
+const ORIGIN = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const MAX_PLAYERS = 12;
 const PING_MS = 25_000;
@@ -38,6 +39,9 @@ const MIME = {
 };
 
 const rooms = new Map();
+// Single-use SSE tickets, same rules as src/tickets.ts: 30 s, bound to (room, player).
+const tickets = new Map();
+const TICKET_TTL_MS = 30_000;
 const steamCache = new Map();
 const ALLOWED_APP_IDS = new Set(GAMES.filter((g) => g.steamId).map((g) => String(g.steamId)));
 
@@ -97,6 +101,14 @@ function snapshot(room) {
 function ownVote(room, player) {
   const gameId = openCardId(room);
   return { playerId: player.id, gameId, vote: (gameId && room.votes[gameId]?.[player.id]) || null };
+}
+
+// Same privacy rule as the real server: names, votes, results and deck only for members.
+function view(req, room) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const member = token && (token === room.hostToken || room.players.some((p) => p.token === token));
+  if (member) return snapshot(room);
+  return { code: room.code, phase: room.phase, playerCount: room.players.length, maxPlayers: MAX_PLAYERS };
 }
 
 function getRoom(code) {
@@ -218,8 +230,19 @@ function botVote(room, bot, gameId) {
 
 // ---------- handlers ----------
 
+const REF_SOURCES = new Set(['tt', 'ig', 'yt', 'x', 'rd', 'dc', 'twitch', 'wa', 'gh', 'qr', 'yo']);
+
+/** Same rules as src/acquisition.ts; the mock only prints the result. */
+function attribution({ ref, viaGuest }) {
+  if (ref !== undefined && ref !== null && typeof ref !== 'string') throw new HttpError(400, 'invalid_body', 'ref must be a string');
+  if (viaGuest !== undefined && typeof viaGuest !== 'boolean') throw new HttpError(400, 'invalid_body', 'viaGuest must be a boolean');
+  return { ref: ref == null ? 'direct' : REF_SOURCES.has(ref) ? ref : 'other', viaGuest: viaGuest ?? false };
+}
+
 async function createRoom(req, res) {
-  const { hostName } = await readJson(req);
+  const body = await readJson(req);
+  const { hostName } = body;
+  const source = attribution(body);
   const name = validName(hostName);
   let code = newCode();
   while (rooms.has(code)) code = newCode();
@@ -229,6 +252,7 @@ async function createRoom(req, res) {
     votes: {}, lastResult: null, history: [], version: 1, clients: new Set(), botTimers: new Set(),
   };
   rooms.set(code, room);
+  console.log(`[mock] room_created ${code} ref=${source.ref} viaGuest=${source.viaGuest}`);
   sendJson(res, 201, { code, hostToken: room.hostToken, playerToken: host.token, playerId: host.id });
 }
 
@@ -319,18 +343,60 @@ async function skip(req, res, room) {
 async function undo(req, res, room) {
   await readJson(req);
   auth(req, room, { host: true });
-  if (room.phase === 'lobby' || room.index === 0) throw new HttpError(409, 'nothing_to_undo', 'Nada para deshacer');
-  room.index -= 1;
-  room.history.pop();
+  const finishedEarly = room.phase === 'finished' && room.index < room.deck.length;
+  if (!finishedEarly && (room.phase === 'lobby' || room.index === 0)) throw new HttpError(409, 'nothing_to_undo', 'Nada para deshacer');
+  if (!finishedEarly) { // after an early finish, the discarded card comes back as is
+    room.index -= 1;
+    room.history.pop();
+    delete room.votes[room.deck[room.index]];
+  }
   room.phase = 'voting';
-  delete room.votes[room.deck[room.index]];
   room.lastResult = null;
   room.botTimers.clear(); // let bots vote again on the reopened card
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
 
+// Host ends voting early: the open card is discarded (votes dropped, no result).
+async function finish(req, res, room) {
+  await readJson(req);
+  auth(req, room, { host: true });
+  if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
+  delete room.votes[room.deck[room.index]];
+  room.phase = 'finished';
+  room.lastResult = null;
+  changed(room);
+  sendJson(res, 200, snapshot(room));
+}
+
+async function streamTicket(req, res, room) {
+  await readJson(req);
+  const player = room.hostToken === String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+    ? room.players.find((p) => p.isHost)
+    : auth(req, room);
+  const ticket = crypto.randomBytes(16).toString('base64url');
+  tickets.set(ticket, { code: room.code, playerId: player.id, expiresAt: Date.now() + TICKET_TTL_MS });
+  sendJson(res, 200, { ticket });
+}
+
+function consumeTicket(req, room) {
+  const ticket = new URL(req.url, 'http://localhost').searchParams.get('ticket') || '';
+  const entry = tickets.get(ticket);
+  tickets.delete(ticket);
+  const ok = entry && entry.code === room.code && entry.expiresAt > Date.now() && room.players.some((p) => p.id === entry.playerId);
+  if (!ok) throw new HttpError(401, 'unauthorized', 'Ticket inválido, vencido o ya usado');
+}
+
+async function closeRoom(req, res, room) {
+  await readJson(req);
+  auth(req, room, { host: true });
+  for (const client of room.clients) client.end('event: closed\ndata: {}\n\n');
+  rooms.delete(room.code);
+  sendJson(res, 200, { closed: true });
+}
+
 function events(req, res, room) {
+  consumeTicket(req, room);
   if (req.method === 'HEAD') return void res.writeHead(200, { 'Content-Type': 'text/event-stream' }).end();
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write(`event: state\ndata: ${JSON.stringify(snapshot(room))}\n\n`);
@@ -422,22 +488,26 @@ function serveStatic(res, pathname) {
   fs.readFile(filePath, (err, content) => {
     if (err) return res.writeHead(404).end('Not found');
     res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
-    res.end(content);
+    // Like src/seo.ts, with the mock's own origin and no verification tags.
+    res.end(rel === 'index.html' ? String(content).replaceAll('__PUBLIC_ORIGIN__', ORIGIN).replace('<!--__SITE_VERIFICATION__-->', '') : content);
   });
 }
 
 // ---------- router ----------
 
 const ROOM_ROUTES = {
-  'GET ': (req, res, room) => sendJson(res, 200, snapshot(room)),
+  'GET ': (req, res, room) => sendJson(res, 200, view(req, room)),
   'POST /join': join,
   'POST /start': start,
   'POST /vote': vote,
   'POST /next': next,
   'POST /undo': undo,
+  'POST /finish': finish,
   'POST /skip': skip,
   'POST /kick': kick,
   'GET /me': me,
+  'POST /close': closeRoom,
+  'POST /stream-ticket': streamTicket,
   'GET /events': events,
   'HEAD /events': events,
 };
@@ -450,13 +520,20 @@ async function route(req, res, pathname) {
   if (pathname === '/healthz') return sendJson(res, 200, { ok: true });
   const mock = pathname.match(/^\/__mock\/rooms\/([^/]+)\/(bots|expire)$/);
   if (mock && req.method === 'POST') return mock[2] === 'bots' ? addBots(req, res, getRoom(mock[1])) : expire(res, getRoom(mock[1]));
-  const roomMatch = pathname.match(/^\/api\/rooms\/([^/]+)(\/[a-z]+)?$/);
+  const roomMatch = pathname.match(/^\/api\/rooms\/([^/]+)(\/[a-z-]+)?$/);
   if (roomMatch) {
     const handler = ROOM_ROUTES[`${req.method} ${roomMatch[2] || ''}`];
     if (!handler) throw new HttpError(405, 'method_not_allowed', 'Método no permitido');
     return handler(req, res, getRoom(roomMatch[1]));
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'method_not_allowed', 'Método no permitido');
+  if (pathname === '/robots.txt') {
+    return res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end(`User-agent: *\nAllow: /\n\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+  }
+  if (pathname === '/sitemap.xml') {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${ORIGIN}/</loc></url>\n</urlset>\n`;
+    return res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' }).end(xml);
+  }
   serveStatic(res, pathname);
 }
 
@@ -465,6 +542,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   try {
     const { pathname } = new URL(req.url, 'http://localhost');
+    if (/^\/(?:api|r)\//.test(pathname)) res.setHeader('X-Robots-Tag', 'noindex');
     await route(req, res, pathname);
   } catch (err) {
     if (!(err instanceof HttpError)) console.error('[mock]', err);

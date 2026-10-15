@@ -81,7 +81,7 @@ Env vars: tabla en `README.md`.
 
 ## Riesgos abiertos
 
-- **Calibración de `X-Forwarded-For` en Render pendiente.** Render no documenta el formato; `render.yaml` arranca con `TRUSTED_PROXY_HOPS=1` y `LOG_PROXY_HEADERS=0`. Si está mal, el límite de 5 salas/IP/hora se vuelve global o falsificable. Procedimiento + chequeo de spoofing en `docs/DEPLOY.md` §4. El Blueprint está en sync manual: las env vars del servicio se cambian a mano en el dashboard (un servicio creado con el default viejo sigue con `LOG_PROXY_HEADERS=1`).
+- **`X-Forwarded-For` en Render calibrado (2026-10-12): `TRUSTED_PROXY_HOPS=3`.** Formato observado: `[cliente, IP de Cloudflare, IP interna 10.x de Render]`; un XFF falsificado por el cliente queda a la izquierda y no cambia la 3ª desde la derecha. Con 1 se leía la IP interna, que cambia por request, y el rate limit por cliente no frenaba nada. Si Render cambia su topología de proxies, hay que recalibrar (`docs/DEPLOY.md` §4). El Blueprint está en sync manual: las env vars se cambian a mano en el dashboard.
 - **Homoglyphs en nombres:** se rechazan invisibles y fillers, pero no se detectan look-alikes entre scripts (Cyrillic `а` vs Latin `a`). Solución completa = esqueletos de confusables (UTS #39), fuera de alcance.
 - **Steam `appdetails` no está documentado** por Valve: puede cambiar o empezar a limitar sin aviso. Cache de 6 h; fallas → 502, nunca crash.
 - **Crossplay/plataformas cargados a mano**: los marcados "verificar" no están confirmados.

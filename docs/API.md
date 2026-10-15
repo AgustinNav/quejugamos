@@ -6,11 +6,20 @@ Source of truth shared by backend and frontend. Change it only with both sides u
 
 - **Room**: one voting night. Identified by `code` (6 chars, alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, uppercase; lookups are case-insensitive).
 - **Player**: `{ id, name, isHost }`. The host is also a player (created with the room).
-- **Tokens**: `hostToken` and `playerToken` are opaque secrets (`crypto.randomUUID()`), sent as `Authorization: Bearer <token>`. Player `id` is public; tokens never appear in snapshots or events.
-- **Phases**: `lobby` → `voting` → `finished`.
+- **Tokens**: `hostToken` and `playerToken` are opaque secrets (`crypto.randomUUID()`), sent as `Authorization: Bearer <token>`. Player `id` is public; tokens never appear in snapshots, events, logs or URLs.
+- **Members**: whoever holds a valid token of THAT room (host or player). Names, votes, results and the deck are only for members: they are the only personal data the server keeps.
+- **Phases**: `lobby` → `voting` → `finished`. The host can jump from `voting` to `finished` early (`finish`).
 - **Deck**: list of `gameId` (the `id` field from `public/games.js`), filtered and shuffled **by the server** at start, so every client sees the same order.
 
-## Snapshot (shape of `GET /api/rooms/:code` and of every SSE `state` event)
+## Public view (`GET /api/rooms/:code` without a member token)
+
+```json
+{ "code": "K7Q2MX", "phase": "voting", "playerCount": 4, "maxPlayers": 12 }
+```
+
+Enough for the join screen ("Sala K7Q2MX · 4 jugadores · votando"). A missing, invalid, kicked or other room's token gets this view, never a 401. Clients tell the two shapes apart by `players` (only in the snapshot).
+
+## Snapshot (shape of `GET /api/rooms/:code` with a member token and of every SSE `state` event)
 
 ```json
 {
@@ -34,7 +43,8 @@ Source of truth shared by backend and frontend. Change it only with both sides u
 - `currentVoters`: ids of the players who already voted on the open card (who, never what). Empty outside `voting`.
 - `lastResult`: the card that was just closed (`null` until the first one). Clients use it for the swipe animation and the "IT'S A MATCH" overlay (`match` = every player liked it).
 - `results`: every closed card, frozen when it closed (`undo` removes the reopened card). Use it for the ranking instead of recomputing from `votes`: players who join later must not change past results.
-- After `undo`, `lastResult` is `null`.
+- After `undo` and after `finish`, `lastResult` is `null`.
+- `phase: "finished"` with `index < deck.length` = the host finished early: `index` cards closed (voted or skipped) out of `deck.length`, and `deck[index]` was discarded (no `results` entry, its votes dropped). After the last card closes normally, `index === deck.length`.
 - A card closed by `skip` ("Ya lo jugamos") has `played: true` and `skippedBy: playerId` in `lastResult`/`results`, with `likes: 0, nopes: 0, match: false` (its votes are discarded). Other results don't carry these fields.
 - `version`: increases by 1 on every change. Clients ignore snapshots with a version ≤ the one they have.
 
@@ -44,17 +54,20 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
 
 | Method | Path | Auth | Body | Success | Errors |
 |---|---|---|---|---|---|
-| POST | `/api/rooms` | — | `{ "hostName": string }` | `201 { code, hostToken, playerToken, playerId }` | 400 `invalid_name`, 429 `rate_limited`, 503 `capacity` |
-| GET | `/api/rooms/:code` | — | — | `200 Snapshot` | 404 `room_not_found`, 429 `rate_limited` |
+| POST | `/api/rooms` | — | `{ "hostName": string, "ref"?: string \| null, "viaGuest"?: boolean }` (see **Acquisition fields**) | `201 { code, hostToken, playerToken, playerId }` | 400 `invalid_name`, 400 `invalid_body`, 429 `rate_limited`, 503 `capacity` |
+| GET | `/api/rooms/:code` | optional (member) | — | `200 Snapshot` with a member token, `200 PublicView` otherwise | 404 `room_not_found`, 429 `rate_limited` |
 | POST | `/api/rooms/:code/join` | — | `{ "name": string }` | `201 { playerToken, playerId }` | 400 `invalid_name`, 404, 409 `name_taken`, 409 `room_full`, 409 `room_finished` |
 | POST | `/api/rooms/:code/start` | host | `{ "filters": { platforms: string[], maxPrice: number \| null, playerCount?: number \| null, fitsGroup?: boolean } }` (see **Start filters**) | `200 Snapshot` | 400 `invalid_filters`, 401, 403 `not_host`, 409 `already_started`, 422 `empty_deck` |
 | POST | `/api/rooms/:code/vote` | player | `{ "gameId": string, "vote": "like" \| "nope" \| null }` | `200 Snapshot & { myVote }` — `myVote`: the caller's vote on the open card of the returned snapshot (`null` if none, e.g. the vote closed the card) | 400 `invalid_vote`, 401, 409 `not_current_game`, 409 `not_voting` |
 | GET | `/api/rooms/:code/me` | player | — | `200 { playerId, gameId, vote }` — the caller's vote on the open card (`gameId`/`vote` `null` when there is none). Used to restore your own vote after a reload | 401, 404 |
 | POST | `/api/rooms/:code/next` | host | `{}` | `200 Snapshot` (closes the current card even if votes are missing) | 401, 403, 409 `not_voting` |
 | POST | `/api/rooms/:code/skip` | player | `{ "gameId": string }` | `200 Snapshot` (closes the current card as already played; see Rules) | 400 `invalid_game`, 401, 409 `not_current_game`, 409 `not_voting` |
-| POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes) | 401, 403, 409 `nothing_to_undo` |
+| POST | `/api/rooms/:code/undo` | host | `{}` | `200 Snapshot` (reopens the previous card and clears its votes; after an early `finish`, reopens the discarded card instead) | 401, 403, 409 `nothing_to_undo` |
+| POST | `/api/rooms/:code/finish` | host | `{}` | `200 Snapshot` (ends voting now; see Rules) | 401, 403 `not_host`, 409 `not_voting` (lobby or already finished) |
 | POST | `/api/rooms/:code/kick` | host | `{ "playerId": string }` | `200 Snapshot` (removes the player; see Rules) | 400 `invalid_player`, 401, 403 `not_host`, 404 `player_not_found`, 409 `cannot_kick_host` |
-| GET | `/api/rooms/:code/events` | — | — | `text/event-stream` (`HEAD` answers the headers and ends, without opening a stream) | 404, 429, 503 `capacity` |
+| POST | `/api/rooms/:code/close` | host | `{}` | `200 { "closed": true }`: the room is deleted now (see Rules) | 401, 403 `not_host`, 404 |
+| POST | `/api/rooms/:code/stream-ticket` | player | `{}` | `200 { "ticket": string }` (single use, 30 s, bound to room + player) | 401, 404 |
+| GET | `/api/rooms/:code/events?ticket=<ticket>` | ticket | — | `text/event-stream` (`HEAD` also needs and consumes a ticket, answers the headers and ends without opening a stream) | 401 `unauthorized` (missing, malformed, expired, reused, other room's ticket, or the player was kicked; no stream opened), 404, 429, 503 `capacity` |
 | GET | `/api/steam/:appId` | — | — | `200 SteamDetails` (see below; `stale: true` when served from an old cache entry) | 404 `unknown_game`, 429, 502 `steam_unavailable` (a failed app is not retried upstream for 120 s; after a Steam 429, no upstream calls for 60 s) |
 | GET | `/healthz` | — | — | `200 { "ok": true }` | — |
 
@@ -66,6 +79,14 @@ All request bodies are JSON (`Content-Type: application/json`, max 1 KB; 16 KB f
 - "One client" = its IP; for IPv6, its /64 prefix (an IPv4-mapped `::ffff:a.b.c.d` counts as the IPv4).
 - `400 bad_request`: malformed URL, NUL byte in the path, invalid `Host`.
 - `408` and connection closed: request headers + body not fully received within 10 s.
+
+## Acquisition fields (`POST /api/rooms`)
+
+Measurement only: they never change the response, are not stored in the room and are never echoed. The server writes them to the `room_created` log line (`ref`, `viaGuest`), which is the durable record (`scripts/metrics-from-logs.mjs` aggregates it per UTC day). Both are validated **before** the room is created, so a rejected request does not consume the per-client room quota.
+
+- `ref`: traffic source, mapped to a closed list. Exact, case-sensitive match against `tt, ig, yt, x, rd, dc, twitch, wa, gh, qr, yo` → logged as is; any other string (including `""`) → `other`; absent or `null` → `direct`; any non-string → `400 invalid_body`.
+- `viaGuest`: `true` when this browser previously joined someone else's room as a player (guest → host loop). Absent → `false`; anything other than a boolean → `400 invalid_body`.
+- Client side: `?ref=<value>` on any page is lowercased, trimmed, cut to 32 chars, stored in `sessionStorage['quejugamos:ref']` and removed from the URL with `history.replaceState` (shared links don't carry it). A successful `join` sets `localStorage['quejugamos:wasGuest'] = '1'`; the client sends `viaGuest: true` only when that flag is set.
 
 ## Start filters
 
@@ -103,21 +124,35 @@ Clients must tolerate a `stale: true` response from an older cache that has only
 - **Auto-advance**: when every player has voted on the current card, the server closes it (sets `lastResult`, `index += 1`). When `index === deck.length`, the phase becomes `finished`.
 - A player who joins mid-voting votes starting from the current card.
 - **Skip ("Ya lo jugamos")**: any player (host included) closes the open card for the whole room through the same path as auto-advance: votes on it are discarded, `lastResult`/`results` get `{ gameId, likes: 0, nopes: 0, match: false, played: true, skippedBy }`, `version` increases, and the phase becomes `finished` if it was the last card. It never counts as a match. `undo` reopens it like any closed card (its `results` entry is removed). Logged as `card_skipped` (`roomCode`, `gameId`; no names). Clients show a "ya lo jugaron" toast/animation instead of LIKE/NOPE.
+- **Finish early**: the host ends voting before the deck runs out. `phase` becomes `finished`; the open card is discarded (its votes are dropped and it gets no `results` entry); closed cards keep their frozen `results`; `lastResult` becomes `null` (no swipe replay); `version` increases. Clients show the normal ranking with "X of Y voted" (`index` of `deck.length`). `undo` right after it reopens that same card (`phase: voting`, same `index`, no votes), so a mis-tap is recoverable; a second `undo` reopens the previous closed card as usual. Logged as `game_finished_early` (`roomCode`, `closedCards`, `deckSize`; no names). Clients can show a partial ranking at any time during `voting` from `results` alone (never recomputed from `votes`).
 - **`filters.excludeGameIds`** (optional, `start` only): up to 200 catalog ids left out of the deck (the host's "ya jugados" memory, kept in the host browser's `localStorage['quejugamos:played']`). Every id must be a known catalog id, otherwise `400 invalid_filters`. Not stored in the room: snapshot `filters` never include it. Other filter fields are parsed independently.
 - **Kick**: the host removes a non-host player (a duplicate entry from another browser, someone who left). The player's token stops working (`401`), their vote on the current card is deleted (closed cards keep their frozen `results`), `version` increases, and if every remaining player already voted the current card closes like an auto-advance (`match` = every remaining player liked it). A client whose `playerId` disappears from a snapshot was kicked: it clears its stored session and shows "El host te sacó de la sala".
 - Names: trimmed (NFC), 1–16 chars. Rejected (`invalid_name`): control/format characters (zero-width, bidi marks, RLM), line/paragraph separators, Hangul fillers (U+3164, U+115F, U+1160, U+FFA0), more than 2 stacked combining marks, and names without at least one letter, digit or emoji. ZWJ is allowed only inside emoji sequences. Unique per room, compared after NFKC + lowercase with invisible code points removed (`ＡＧＵＳ` = `agus`). Cross-script look-alikes (Cyrillic `а` vs Latin `a`) are not detected.
 - Limits: 12 players per room, 500 live rooms, 5 rooms created per client per hour, rooms expire after 2 h without activity. A lobby where only the host is present expires after 20 min idle; at the 500-room cap, the lone-host lobby idle the longest (at least 5 min) is evicted to make room.
+- **Empty rooms**: a room that had at least one live SSE stream and now has none is deleted after 10 min with nobody connected (any phase). Reconnecting within the window cancels it. A room that never had a stream follows only the TTLs above.
+- **Close**: the host deletes the room immediately. Every stream gets `event: closed` and ends; any later request for that code is `404 room_not_found`. Clients that receive `closed` clear their stored session and show "La sala se cerró".
+- Every removal is logged as `room_expired` with `reason`: `idle` (TTL or capacity eviction), `empty` (nobody connected) or `closed_by_host`.
 
-## SSE `/api/rooms/:code/events`
+## SSE `/api/rooms/:code/events?ticket=...`
 
+- `EventSource` can't send an `Authorization` header, so a member first trades its token for a ticket (`POST /stream-ticket`) and puts the ticket, never the token, in the URL. Tickets are 128 random bits (base64url), single use, valid 30 s, bound to (room, playerId); up to 4 outstanding per player. They are never logged by the app; a proxy access log may record the URL, which is why they are single use and short-lived.
 - On connect the server immediately sends `event: state` with the full snapshot (this is the reconnection strategy: there are no diffs, the client always replaces its state).
 - After that, one `event: state` on every change, plus a `: ping` comment every 25 s so proxies don't close the connection.
 - When the room expires: `event: closed` and the server ends the stream.
 - Caps: 50 streams per room, 20 per client, 2000 per server. Over a cap: `503 capacity` (JSON, no stream).
-- A client that stops reading (more than 64 KB pending) is disconnected; `EventSource` reconnects and gets a fresh snapshot.
-- The client uses the native `EventSource` (automatic reconnection).
+- A client that stops reading (more than 64 KB pending) is disconnected and reconnects with a fresh ticket, getting a fresh snapshot.
+- **Reconnection is manual**: native `EventSource` auto-reconnect would reuse the URL, whose ticket is already spent (401). On `error` the client closes the `EventSource`, shows "reconectando…", and after a backoff (3 s doubling up to 30 s, reset on `open`) fetches `GET /api/rooms/:code` with its token (404 → "La sala se cerró"; public view → kicked) and connects again with a new ticket. A 401 from `stream-ticket` is retried once, then the session is treated as invalid.
+- Live streams are the room's presence: see **Empty rooms**.
+- **Deploy note**: this contract (tickets, member-only snapshot) shipped together on client and server. A tab opened before that deploy keeps reconnecting to the old ticketless URL (401) and needs a reload.
+
+## SEO and crawler endpoints
+
+- `GET /robots.txt` → `200 text/plain; charset=utf-8`: `User-agent: *`, `Allow: /`, `Sitemap: {PUBLIC_ORIGIN}/sitemap.xml`. Nothing is disallowed on purpose: crawlers must be able to fetch `/r/*` to see its `noindex`.
+- `GET /sitemap.xml` → `200 application/xml; charset=utf-8` with a single URL: `{PUBLIC_ORIGIN}/`.
+- Every response under `/r/*` and `/api/*` carries `X-Robots-Tag: noindex`.
+- `index.html` (served for `/`, `/index.html` and `/r/:code`) is rendered at serve time: `canonical`, `og:url`, `og:image`, `twitter:image` and the JSON-LD `url` use the absolute `PUBLIC_ORIGIN` (never the request's `Host`), and the `google-site-verification` / `msvalidate.01` meta tags appear only when their env vars are set and valid.
 
 ## Frontend routes (the server serves `public/index.html` for these)
 
 - `/` — landing: create a room (host name) or join with a code.
-- `/r/:code` — the room. No token in `localStorage['quejugamos:room:<CODE>']` → join form. Host → host view (large card, QR, who already voted). Others → phone view.
+- `/r/:code` — the room. No token in `localStorage['quejugamos:room:<CODE>']` (or a token the server no longer accepts) → join form built from the public view; a finished room shows "Votación terminada" instead (the ranking is for members). Host → host view (large card, QR, who already voted, "Cerrar sala"). Others → phone view.

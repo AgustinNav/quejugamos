@@ -19,6 +19,9 @@ Abrir http://localhost:3000. Node 24+ (corre TypeScript nativo, sin build), cero
 | `STEAM_CC` | `ar` | Región de precios de Steam |
 | `TRUSTED_PROXY_HOPS` | `0` | Proxies que agregan entradas a `X-Forwarded-For` delante del server (`TRUST_PROXY=1` equivale a `1`). Ver `docs/DEPLOY.md` §4 |
 | `LOG_PROXY_HEADERS` | `0` | `1` loguea `X-Forwarded-For` al crear una sala, para calibrar lo anterior |
+| `PUBLIC_ORIGIN` | `https://quejugamos.onrender.com` | Origen público (sin path) para `canonical`, `og:url`, `og:image`, JSON-LD, `robots.txt` y `sitemap.xml`. Cambiar de dominio = cambiar solo esta variable. Inválido → default + WARNING `config_invalid` al arrancar |
+| `GOOGLE_SITE_VERIFICATION` | — | Token de Google Search Console; inyecta `<meta name="google-site-verification">`. Debe matchear `^[A-Za-z0-9_-]{10,100}$`, si no se ignora con WARNING |
+| `BING_SITE_VERIFICATION` | — | Token de Bing Webmaster Tools; inyecta `<meta name="msvalidate.01">`. Misma validación |
 
 Para probar con celulares en la misma red: `HOST=0.0.0.0 npm start` y abrir `http://<ip-de-tu-pc>:3000`.
 
@@ -47,7 +50,7 @@ npm test
 ## Datos y límites
 
 - Precio, trailer, capturas y reseñas vienen en vivo de Steam (cache de 6 h). Plataformas y crossplay están cargados a mano: los marcados "verificar" no están confirmados.
-- Las salas viven en memoria: se pierden si el server se reinicia y expiran tras 2 h sin actividad. Por eso corre en **una sola instancia**.
+- Las salas viven en memoria: se pierden si el server se reinicia, expiran tras 2 h sin actividad, se borran a los 10 min de quedar sin nadie conectado y el host puede cerrarlas en el momento. Por eso corre en **una sola instancia**.
 - Límites: 12 jugadores por sala, 500 salas activas, 5 salas creadas por IP por hora.
 
 ## Seguridad

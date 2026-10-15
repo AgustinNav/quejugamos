@@ -23,6 +23,7 @@ const MESSAGES = {
   kicked: 'Si fue un error, podés volver a entrar con tu nombre.',
   unknown_game: 'No encontramos ese juego.',
   steam_unavailable: 'Steam no responde ahora: algunos datos del juego pueden faltar.',
+  invalid_body: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
   invalid_json: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
   bad_request: 'El servidor no entendió el pedido. Recargá la página y probá de nuevo.',
   body_too_large: 'Ese texto es demasiado largo.',
@@ -32,7 +33,7 @@ const MESSAGES = {
   internal: 'Se nos rompió algo del lado del servidor. Probá de nuevo en un ratito.',
   network: 'Sin conexión con el servidor. Revisá tu internet y probá de nuevo.',
   invalid_code: 'Ese código no parece válido: son 6 letras o números (por ej. K7Q2MX).',
-  closed: 'La sala se cerró (expiró tras 2 horas sin movimiento o se reinició el servidor). Creá una nueva para seguir.',
+  closed: 'La sala se cerró: la cerró el host, quedó vacía más de 10 minutos, expiró sin movimiento o se reinició el servidor. Los nombres y los votos se borraron. Creá una nueva para seguir.',
 };
 
 const TITLES = {

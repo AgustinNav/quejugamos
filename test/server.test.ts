@@ -1,7 +1,7 @@
 import { after, afterEach, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { api, openSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
+import { api, eventsPath, openRoomSse, rawPost, rawRequest, startTestServer } from './helpers.ts';
 import type { SseClient, TestServer } from './helpers.ts';
 import { GAMES } from '../public/games.js';
 
@@ -61,7 +61,7 @@ describe('full flow', () => {
     assert.equal(ana.status, 201);
     assert.deepEqual(Object.keys(ana.body).sort(), ['playerId', 'playerToken']);
 
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.playerToken);
     sseClients.push(sse);
     assert.equal(sse.status, 200);
     assert.match(String(sse.headers['content-type']), /^text\/event-stream/);
@@ -91,7 +91,7 @@ describe('full flow', () => {
     assert.deepEqual(pushed, v2Snapshot);
     assert.ok(!event.data.includes(room.hostToken) && !event.data.includes(ana.body.playerToken));
 
-    const snap = await api(base, 'GET', `/api/rooms/${room.code}`);
+    const snap = await api(base, 'GET', `/api/rooms/${room.code}`, undefined, ana.body.playerToken);
     assert.deepEqual(snap.body, v2Snapshot);
 
     const next = await api(base, 'POST', `/api/rooms/${room.code}/next`, {}, room.hostToken);
@@ -154,7 +154,7 @@ describe('full flow', () => {
     await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
     await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.playerToken);
 
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
 
@@ -183,7 +183,7 @@ describe('full flow', () => {
     const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
     const first = started.body.deck[0];
     await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
 
@@ -213,6 +213,55 @@ describe('full flow', () => {
     assert.ok(!srv.logs.some((l) => JSON.parse(l).event === 'card_closed' && JSON.parse(l).roomCode === room.code));
   });
 
+  test('finish: host ends voting early, SSE gets the finished snapshot, undo reopens the open card', async () => {
+    const room = await createRoom('Agus');
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const deck: string[] = started.body.deck;
+    assert.ok(deck.length >= 3, 'the test needs at least 3 cards');
+    for (const gameId of deck.slice(0, 2)) {
+      await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId, vote: 'like' }, room.playerToken);
+      await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId, vote: 'nope' }, ana.playerToken);
+    }
+    await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: deck[2], vote: 'like' }, ana.playerToken);
+    const sse = await openRoomSse(base, room.code, ana.playerToken);
+    sseClients.push(sse);
+    await sse.waitFor((e) => e.event === 'state');
+
+    const notHost = await api(base, 'POST', `/api/rooms/${room.code}/finish`, {}, ana.playerToken);
+    assert.equal(notHost.status, 403);
+    assert.equal(notHost.body.error, 'not_host');
+
+    const finished = await api(base, 'POST', `/api/rooms/${room.code}/finish`, {}, room.hostToken);
+    assert.equal(finished.status, 200);
+    assert.equal(finished.body.phase, 'finished');
+    assert.equal(finished.body.index, 2);
+    assert.equal(finished.body.lastResult, null);
+    assert.deepEqual(Object.keys(finished.body.results).sort(), deck.slice(0, 2).sort());
+    assert.equal(finished.body.votes[deck[2]], undefined, 'the discarded card must not leak its votes');
+    const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === finished.body.version);
+    assert.deepEqual(JSON.parse(event.data), finished.body);
+
+    const twice = await api(base, 'POST', `/api/rooms/${room.code}/finish`, {}, room.hostToken);
+    assert.equal(twice.status, 409);
+    assert.equal(twice.body.error, 'not_voting');
+
+    const undo = await api(base, 'POST', `/api/rooms/${room.code}/undo`, {}, room.hostToken);
+    assert.equal(undo.status, 200);
+    assert.equal(undo.body.phase, 'voting');
+    assert.equal(undo.body.index, 2);
+    assert.deepEqual(undo.body.currentVoters, []);
+    assert.equal(Object.keys(undo.body.results).length, 2);
+
+    const logs = srv.logs.map((l) => JSON.parse(l)).filter((l) => l.roomCode === room.code);
+    const log = logs.find((l) => l.event === 'game_finished_early');
+    assert.deepEqual(log, { severity: 'INFO', event: 'game_finished_early', roomCode: room.code, closedCards: 2, deckSize: deck.length });
+    const reopened = logs.find((l) => l.event === 'card_reopened');
+    assert.equal(reopened.afterEarlyFinish, true);
+    assert.equal(reopened.gameId, deck[2]);
+    for (const l of logs) assert.ok(!JSON.stringify(l).includes('Ana') && !JSON.stringify(l).includes('Agus'), 'names must not be logged');
+  });
+
   test('start: excludeGameIds leaves those games out and is not echoed in the snapshot', async () => {
     const room = await createRoom();
     const all = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
@@ -229,18 +278,18 @@ describe('full flow', () => {
     assert.equal(log.excludedGames, 3);
   });
 
-  test('open-card votes: GET and SSE without a token only show who voted; /me returns your own vote', async () => {
+  test('open-card votes: member GET and SSE only show who voted; /me returns your own vote', async () => {
     const room = await createRoom();
     const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
     const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
     const first = started.body.deck[0];
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     const voted = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'nope' }, ana.playerToken);
     assert.equal(voted.body.myVote, 'nope');
 
     const pushed = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === voted.body.version);
-    const snap = await api(base, 'GET', `/api/rooms/${room.code}`);
+    const snap = await api(base, 'GET', `/api/rooms/${room.code}`, undefined, room.hostToken);
     for (const body of [snap.body, JSON.parse(pushed.data)]) {
       assert.deepEqual(body.votes, {});
       assert.deepEqual(body.currentVoters, [ana.playerId]);
@@ -283,7 +332,8 @@ describe('full flow', () => {
 
   test('HEAD on events answers the headers and ends without holding a stream', async () => {
     const room = await createRoom();
-    const { status, ended } = await headRequest(srv.port, `/api/rooms/${room.code}/events`);
+    assert.equal((await headRequest(srv.port, `/api/rooms/${room.code}/events`)).status, 401, 'HEAD needs a ticket too');
+    const { status, ended } = await headRequest(srv.port, await eventsPath(base, room.code, room.hostToken));
     assert.equal(status, 200);
     assert.ok(ended, 'HEAD response did not end');
     assert.equal(srv.hub.connectionCount(room.code), 0);
@@ -292,7 +342,7 @@ describe('full flow', () => {
 
   test('SSE receives closed when the room expires', async () => {
     const room = await createRoom();
-    const sse = await openSse(`${base}/api/rooms/${room.code}/events`);
+    const sse = await openRoomSse(base, room.code, room.hostToken);
     sseClients.push(sse);
     await sse.waitFor((e) => e.event === 'state');
     srv.clock.t += 3 * 60 * 60 * 1000;
@@ -308,7 +358,7 @@ describe('full flow', () => {
 describe('malformed input never kills the process', () => {
   afterEach(assertAlive);
 
-  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick', 'skip'];
+  const POSTS = ['join', 'start', 'vote', 'next', 'undo', 'kick', 'skip', 'finish', 'close', 'stream-ticket'];
   // start accepts a bigger body (excludeGameIds), so its "too large" case has to be bigger.
   const OVERSIZED = (action: string) => (action === 'start' ? 17 * 1024 : 2048);
 
@@ -387,6 +437,28 @@ describe('malformed input never kills the process', () => {
     const wrong = await api(base, 'POST', path, { gameId: 'not-a-game' }, room.playerToken);
     assert.equal(wrong.status, 409);
     assert.equal(wrong.body.error, 'not_current_game');
+  });
+
+  test('finish: lobby, non-host, finished, odd bodies and GET', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const path = `/api/rooms/${room.code}/finish`;
+    const lobby = await api(base, 'POST', path, {}, room.hostToken);
+    assert.equal(lobby.status, 409);
+    assert.equal(lobby.body.error, 'not_voting');
+    await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const notHost = await api(base, 'POST', path, {}, ana.playerToken);
+    assert.equal(notHost.status, 403);
+    assert.equal(notHost.body.error, 'not_host');
+    assert.equal((await api(base, 'GET', path)).status, 405);
+    assert.equal((await rawPost(base, path, '{"', 'application/json', room.hostToken)).status, 400);
+    assert.equal((await rawPost(base, path, '{}', 'application/json', 'x'.repeat(300))).status, 401);
+    assert.equal((await api(base, 'GET', `/api/rooms/${room.code}`)).body.phase, 'voting');
+    // The body is ignored: any valid JSON finishes, like next/undo.
+    assert.equal((await api(base, 'POST', path, [1, 2], room.hostToken)).status, 200);
+    const again = await api(base, 'POST', path, {}, room.hostToken);
+    assert.equal(again.status, 409);
+    assert.equal(again.body.error, 'not_voting');
   });
 
   test('start: malformed excludeGameIds is a 400 invalid_filters', async () => {

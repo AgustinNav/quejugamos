@@ -12,6 +12,7 @@ function makeStore(limits: Partial<RoomLimits> = {}) {
   let counter = 0;
   let seed = 42;
   const expired: string[] = [];
+  const reasons: string[] = [];
   const store = new RoomStore({
     now: () => clock.t,
     // Deterministic LCG: reproducible codes without cycling through a tiny period.
@@ -20,9 +21,9 @@ function makeStore(limits: Partial<RoomLimits> = {}) {
       return Math.floor((seed / 2147483648) * max);
     },
     uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
-    onExpire: (code) => expired.push(code),
+    onExpire: (code, reason) => { expired.push(code); reasons.push(reason); },
   }, limits);
-  return { store, clock, expired };
+  return { store, clock, expired, reasons };
 }
 
 function expectError(fn: () => unknown, status: number, code: string) {
@@ -399,6 +400,105 @@ describe('undo', () => {
   });
 });
 
+describe('finish (end voting early)', () => {
+  test('mid-deck: keeps closed results, discards the open card and its votes', () => {
+    const r = votingRoom();
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.ana.playerToken, 'b', 'nope');
+    r.store.next(r.code, r.host.hostToken); // b closes with 1 nope
+    r.store.vote(r.code, r.ana.playerToken, 'c', 'like'); // open card, must be dropped
+    const before = r.store.snapshot(r.code);
+    const snap = r.store.finish(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'finished');
+    assert.equal(snap.index, 2);
+    assert.equal(snap.version, before.version + 1);
+    assert.equal(snap.lastResult, null);
+    assert.deepEqual(Object.keys(snap.results), ['a', 'b']);
+    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 3, nopes: 0, match: true });
+    assert.equal(snap.results.c, undefined);
+    // Outside voting the open card's votes would show up in `votes`: they must be gone, not leaked.
+    assert.equal(snap.votes.c, undefined);
+    assert.deepEqual(snap.currentVoters, []);
+  });
+
+  test('on the first card: finishes with no results', () => {
+    const r = votingRoom();
+    const snap = r.store.finish(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'finished');
+    assert.equal(snap.index, 0);
+    assert.deepEqual(snap.results, {});
+  });
+
+  test('rejects in lobby and when already finished (409 not_voting)', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    expectError(() => store.finish(host.code, host.hostToken), 409, 'not_voting');
+    store.start(host.code, host.hostToken, FILTERS, fixedDeck);
+    store.finish(host.code, host.hostToken);
+    expectError(() => store.finish(host.code, host.hostToken), 409, 'not_voting');
+  });
+
+  test('rejects after the deck ran out (normal finish)', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    store.start(host.code, host.hostToken, FILTERS, () => ['x']);
+    store.next(host.code, host.hostToken);
+    expectError(() => store.finish(host.code, host.hostToken), 409, 'not_voting');
+  });
+
+  test('requires the host (403) and a valid token (401), without changing state', () => {
+    const r = votingRoom();
+    const version = r.store.snapshot(r.code).version;
+    expectError(() => r.store.finish(r.code, r.ana.playerToken), 403, 'not_host');
+    expectError(() => r.store.finish(r.code, null), 401, 'unauthorized');
+    expectError(() => r.store.finish(r.code, 'nope'), 401, 'unauthorized');
+    assert.equal(r.store.snapshot(r.code).phase, 'voting');
+    assert.equal(r.store.snapshot(r.code).version, version);
+  });
+
+  test('votes and skips are rejected once finished; joins are refused', () => {
+    const r = votingRoom();
+    r.store.finish(r.code, r.host.hostToken);
+    expectError(() => r.store.vote(r.code, r.ana.playerToken, 'a', 'like'), 409, 'not_voting');
+    expectError(() => r.store.skip(r.code, r.ana.playerToken, 'a'), 409, 'not_voting');
+    expectError(() => r.store.join(r.code, 'Late'), 409, 'room_finished');
+  });
+
+  test('undo reopens the card that was open, with no votes, and keeps closed results', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
+    r.store.next(r.code, r.host.hostToken);
+    r.store.vote(r.code, r.ana.playerToken, 'b', 'like');
+    r.store.finish(r.code, r.host.hostToken);
+    const snap = r.store.undo(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'voting');
+    assert.equal(snap.index, 1);
+    assert.equal(snap.lastResult, null);
+    assert.deepEqual(Object.keys(snap.results), ['a']);
+    assert.deepEqual(snap.currentVoters, []);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, null);
+    // Voting continues normally from there, and a second undo reopens the previous closed card.
+    for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'b', 'nope');
+    assert.equal(r.store.snapshot(r.code).index, 2);
+    assert.equal(r.store.undo(r.code, r.host.hostToken).index, 1);
+  });
+
+  test('undo right after finishing on the first card reopens it', () => {
+    const r = votingRoom();
+    r.store.finish(r.code, r.host.hostToken);
+    const snap = r.store.undo(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'voting');
+    assert.equal(snap.index, 0);
+  });
+
+  test('undo after an early finish requires the host', () => {
+    const r = votingRoom();
+    r.store.finish(r.code, r.host.hostToken);
+    expectError(() => r.store.undo(r.code, r.bob.playerToken), 403, 'not_host');
+    assert.equal(r.store.snapshot(r.code).phase, 'finished');
+  });
+});
+
 describe('kick', () => {
   test('removes the player, drops their current vote and bumps the version', () => {
     const r = votingRoom();
@@ -679,5 +779,138 @@ describe('skip ("Ya lo jugamos")', () => {
     r.store.join(r.code, 'Late');
     r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
     assert.deepEqual(r.store.snapshot(r.code).results.a, skipped('a', r.bob.playerId));
+  });
+});
+
+const MIN = 60 * 1000;
+
+describe('presence-based cleanup (empty rooms)', () => {
+  test('a room whose last stream disconnected is deleted after 10 min with nobody connected', () => {
+    const { store, clock, expired, reasons } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
+    store.setPresence(code, 2);
+    store.setPresence(code, 0);
+    clock.t += 10 * MIN;
+    assert.deepEqual(store.expire(), [], 'exactly 10 min is still inside the window');
+    clock.t += 1;
+    assert.deepEqual(store.expire(), [code]);
+    assert.deepEqual(expired, [code]);
+    assert.deepEqual(reasons, ['empty']);
+    expectError(() => store.snapshot(code), 404, 'room_not_found');
+  });
+
+  test('reconnecting within the window cancels the countdown', () => {
+    const { store, clock } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
+    store.setPresence(code, 1);
+    store.setPresence(code, 0);
+    clock.t += 9 * MIN;
+    store.setPresence(code, 1);
+    clock.t += 30 * MIN;
+    assert.deepEqual(store.expire(), [], 'connected: only the 2 h idle TTL applies');
+    store.setPresence(code, 0);
+    clock.t += 10 * MIN + 1;
+    assert.deepEqual(store.expire(), [code], 'the window restarts from the last disconnect');
+  });
+
+  test('a finished room is deleted 10 min after its last client left', () => {
+    const { store, clock, reasons } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    store.setPresence(host.code, 1);
+    store.start(host.code, host.hostToken, FILTERS, () => ['a']);
+    store.vote(host.code, host.hostToken, 'a', 'like');
+    assert.equal(store.snapshot(host.code).phase, 'finished');
+    clock.t += 60 * MIN;
+    assert.deepEqual(store.expire(), [], 'still connected');
+    store.setPresence(host.code, 0);
+    clock.t += 10 * MIN + 1;
+    assert.deepEqual(store.expire(), [host.code]);
+    assert.deepEqual(reasons, ['empty']);
+  });
+
+  test('a room that never had a connection keeps the lobby / 2 h TTLs', () => {
+    const { store, clock, reasons } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    store.join(code, 'Ana');
+    store.setPresence(code, 0); // a 0 report without a prior connection starts nothing
+    clock.t += 11 * MIN;
+    assert.deepEqual(store.expire(), []);
+    clock.t += 2 * 60 * MIN;
+    assert.deepEqual(store.expire(), [code]);
+    assert.deepEqual(reasons, ['idle']);
+  });
+
+  test('presence is not a mutation and unknown codes are ignored', () => {
+    const { store } = makeStore();
+    const { code } = store.create('Host', '1.1.1.1');
+    const version = store.snapshot(code).version;
+    store.setPresence(code, 3);
+    store.setPresence('ZZZZZZ', 0);
+    assert.equal(store.snapshot(code).version, version);
+  });
+
+  test('the window is configurable', () => {
+    const { store, clock } = makeStore({ emptyRoomTtlMs: 1000 });
+    const { code } = store.create('Host', '1.1.1.1');
+    store.setPresence(code, 1);
+    store.setPresence(code, 0);
+    clock.t += 1001;
+    expectError(() => store.snapshot(code), 404, 'room_not_found');
+  });
+});
+
+describe('host closes the room', () => {
+  test('close deletes the room immediately with reason closed_by_host', () => {
+    const { store, expired, reasons } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const ana = store.join(host.code, 'Ana');
+    store.close(host.code, host.hostToken);
+    assert.deepEqual(expired, [host.code]);
+    assert.deepEqual(reasons, ['closed_by_host']);
+    assert.equal(store.size, 0);
+    expectError(() => store.snapshot(host.code), 404, 'room_not_found');
+    expectError(() => store.currentVote(host.code, ana.playerToken), 404, 'room_not_found');
+  });
+
+  test('a non-host gets 403 not_host, no token or a foreign token 401; the room survives', () => {
+    const { store, expired } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const other = store.create('Other', '1.1.1.2');
+    const ana = store.join(host.code, 'Ana');
+    expectError(() => store.close(host.code, ana.playerToken), 403, 'not_host');
+    expectError(() => store.close(host.code, null), 401, 'unauthorized');
+    expectError(() => store.close(host.code, other.hostToken), 401, 'unauthorized');
+    expectError(() => store.close('ZZZZZZ', host.hostToken), 404, 'room_not_found');
+    assert.deepEqual(expired, []);
+    assert.equal(store.snapshot(host.code).players.length, 2);
+  });
+});
+
+describe('member view vs public view', () => {
+  test('members get the snapshot; no token or a foreign token gets only code/phase/counts', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const other = store.create('Other', '1.1.1.2');
+    const ana = store.join(host.code, 'Ana');
+    assert.deepEqual(store.view(host.code, ana.playerToken), store.snapshot(host.code));
+    assert.deepEqual(store.view(host.code, host.hostToken), store.snapshot(host.code));
+    const expected = { code: host.code, phase: 'lobby', playerCount: 2, maxPlayers: 12 };
+    assert.deepEqual(store.view(host.code, null), expected);
+    assert.deepEqual(store.view(host.code, other.hostToken), expected);
+    assert.deepEqual(store.view(host.code, 'garbage'), expected);
+  });
+
+  test('playerId / hasPlayer bind tickets to a member and notice kicks', () => {
+    const { store } = makeStore();
+    const host = store.create('Host', '1.1.1.1');
+    const ana = store.join(host.code, 'Ana');
+    assert.equal(store.playerId(host.code, ana.playerToken), ana.playerId);
+    expectError(() => store.playerId(host.code, null), 401, 'unauthorized');
+    assert.equal(store.hasPlayer(host.code, ana.playerId), true);
+    store.kick(host.code, host.hostToken, ana.playerId);
+    assert.equal(store.hasPlayer(host.code, ana.playerId), false);
+    assert.equal(store.hasPlayer('ZZZZZZ', ana.playerId), false);
   });
 });
