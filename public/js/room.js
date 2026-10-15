@@ -1,12 +1,12 @@
 // Room lifecycle: initial fetch, SSE connection, snapshot versioning and rendering by phase.
-import { $, setLoading, toast } from './dom.js';
+import { $, clearToast, setLoading, toast } from './dom.js';
 import { ApiError, api, isMemberSnapshot, openEvents } from './api.js';
 import { loadSession, saveSession, clearSession } from './store.js';
 import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
 import { fadeAway, flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
-import { reconcileVote } from './reconcile.js';
+import { closeKey, createOnce, reconcileVote } from './reconcile.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
@@ -18,6 +18,8 @@ const RECONNECT_DELAY_MS = 3000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
 let active = null;
+// Each card close is announced (toast / match overlay) exactly once, whatever re-renders it.
+const announceOnce = createOnce();
 
 export const activeRoom = () => active;
 
@@ -33,7 +35,11 @@ export function enterRoom(code) {
     // authRetries allows one re-ticket after a 401 before treating the session as gone.
     connectAttempt: 0, retries: 0, authRetries: 0,
   };
-  room.onVisible = () => { if (document.visibilityState === 'visible') resync(room); };
+  room.onVisible = () => {
+    if (document.visibilityState !== 'visible') return;
+    settleAfterHidden(room);
+    resync(room);
+  };
   document.addEventListener('visibilitychange', room.onVisible);
   active = room;
   showRoomBadge(code);
@@ -55,6 +61,7 @@ function leaveRoom(room) {
   disposeRoom(room);
   resetMedia();
   resetCard();
+  clearToast();
   forgetRenderedGame();
   setConnBadge(false);
   $('roomBadge').hidden = true;
@@ -286,38 +293,74 @@ function cardClosed(prev, next) {
 }
 
 function render(room, prev) {
-  if (cardClosed(prev, room.state)) return animateClose(room);
-  renderPhase(room);
+  // A toast belongs to the phase it was shown in (a paused room or a resumed vote is another context).
+  if (prev && prev.phase !== room.state.phase) clearToast();
+  if (!cardClosed(prev, room.state)) return renderPhase(room);
+  const result = room.state.lastResult;
+  announceClose(room, room.state);
+  animateClose(room, () => exitFor(result));
 }
 
 // The card leaves (thrown, or shrunk if most voters had played it), the next game is painted into it while
 // hidden over the identical card underneath, then it fades in. Snapshots arriving meanwhile are
 // kept (room.busy) and rendered at the end. `leave` is the exit animation: the server result by default,
 // the own vote for an optimistic advance.
-async function animateClose(room, leave = () => leaveCard(room.state.lastResult)) {
+// A hidden tab paints no frames and throttles timers (up to a minute), so there the swap is instant:
+// an animation nobody sees must never hold the card (and room.busy, which blocks voting) hostage.
+async function animateClose(room, leave) {
   room.busy = true;
   const run = ++room.closeRun;
-  await leave();
-  if (room.disposed) return void (room.busy = false);
-  if (run !== room.closeRun) return; // rolled back meanwhile: the rollback owns the card
-  prepareNextCard();
-  paint(room);
-  await revealNextCard();
-  if (run !== room.closeRun) return;
-  room.busy = false;
-  if (!room.disposed) renderPhase(room);
+  const current = () => run === room.closeRun && !room.disposed;
+  try {
+    if (document.visibilityState === 'hidden') {
+      resetCard();
+    } else {
+      await leave();
+      if (!current()) return; // rolled back or reconciled meanwhile: that path owns the card
+      prepareNextCard();
+    }
+    paint(room);
+    if (document.visibilityState !== 'hidden') await revealNextCard();
+  } catch (err) {
+    // Never leave the card hidden and voting blocked: show the current state as it is.
+    console.error('[room] close animation failed:', err);
+    if (current()) resetCard();
+  } finally {
+    if (run === room.closeRun) room.busy = false;
+  }
+  if (current()) renderPhase(room);
 }
 
-function announceClose(result) {
+// The name comes from the result being announced, never from the card on screen (by now the next one).
+function announceClose(room, snapshot) {
+  const result = snapshot.lastResult;
+  if (!result || !announceOnce(closeKey(room.code, snapshot))) return;
   if (!result.playedOut) return announceResult(result);
   // Ranked apart as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
-  toast(`«${gameName(result.gameId)}» — la mayoría ya lo jugó`);
+  toast(`«${gameName(result.gameId)}» — la mayoría ya lo jugó`, { ms: 3000 });
 }
 
-function leaveCard(result) {
-  announceClose(result);
+function exitFor(result) {
   if (result.playedOut) return playedOut();
   return flyOut(result.likes > result.nopes ? 'right' : 'left');
+}
+
+/**
+ * Back from another tab: whatever animation was in flight there ran without frames and on throttled
+ * timers (transitionend may never come). Drop it, put the card at rest and paint the latest state;
+ * resync() then refetches in case the stream missed events. An optimistic advance stays pending
+ * (paint shows its card) and is settled by the vote response as usual.
+ */
+function settleAfterHidden(room) {
+  if (room.disposed || !room.state) return;
+  const wasAnimating = room.busy;
+  if (wasAnimating) {
+    room.closeRun += 1; // the animation's continuations see they are stale and stop
+    room.busy = false;
+  }
+  if (!wasAnimating && room.state.phase !== 'voting') return; // lobby/results have no card to fix
+  resetCard();
+  paint(room);
 }
 
 // ---------- optimistic advance ----------
@@ -338,7 +381,7 @@ export function beginOptimisticAdvance(room, vote) {
 // The server agrees the card closed: the screen is already right, only the data is synced.
 function settleOptimistic(room) {
   room.optimistic = null;
-  if (room.state.lastResult) announceClose(room.state.lastResult);
+  announceClose(room, room.state);
   if (!room.busy) renderPhase(room);
   return true;
 }

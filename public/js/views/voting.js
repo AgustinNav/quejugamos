@@ -1,4 +1,5 @@
-// Voting screen. Host and phone share this DOM; body.is-host / body.is-phone switch the layout.
+// Voting screen. Host and players share this DOM: body.is-host gates the host controls, the
+// layout follows the viewport (media queries in styles.css).
 import { $, esc, showScreen, announce, kickButton } from '../dom.js';
 import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks } from '../catalog.js';
 import { renderMedia } from '../media.js';
@@ -9,6 +10,8 @@ const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
 
 let renderedGameId = null;
 let matchTimer = null;
+let matchUntil = 0;
+const MATCH_MS = 1800; // .match-overlay.play animation (styles.css)
 
 export const currentGameId = (state) => state.deck[state.index] ?? null;
 
@@ -132,8 +135,20 @@ export function showMatch(gameName) {
   overlay.classList.add('play');
   announce(`¡Match! ${gameName} les gusta a todos.`);
   clearTimeout(matchTimer);
-  matchTimer = setTimeout(() => { overlay.hidden = true; }, 1800);
+  matchUntil = Date.now() + MATCH_MS;
+  matchTimer = setTimeout(hideMatch, MATCH_MS);
 }
+
+function hideMatch() {
+  clearTimeout(matchTimer);
+  matchTimer = null;
+  $('matchOverlay').hidden = true;
+}
+
+// Same as the toast (dom.js): a throttled timer in a hidden tab must not leave the overlay over the next card.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && matchTimer && Date.now() >= matchUntil) hideMatch();
+});
 
 export function announceResult(result) {
   const game = gameOrStub(result.gameId);

@@ -22,14 +22,30 @@ export function setLoading(visible, text = 'Cargando…') {
 }
 
 let toastTimer = null;
+let toastUntil = 0;
 
-export function toast(message) {
+// One toast at a time: a new one replaces the text and restarts the lifetime.
+export function toast(message, { ms = 3500 } = {}) {
   const el = $('toast');
   el.textContent = message;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
+  toastUntil = Date.now() + ms;
+  toastTimer = setTimeout(clearToast, ms);
 }
+
+export function clearToast() {
+  clearTimeout(toastTimer);
+  toastTimer = null;
+  toastUntil = 0;
+  $('toast').hidden = true;
+}
+
+// Hidden tabs throttle timers (up to a minute in Chrome): a toast whose lifetime ran out while the
+// user was in another tab must not greet them, over a different card, when they come back.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && toastTimer && Date.now() >= toastUntil) clearToast();
+});
 
 // Screen-reader announcement; clearing first makes repeated messages re-announce.
 // setTimeout (not rAF) so it still lands when the tab is in the background.

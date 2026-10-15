@@ -15,3 +15,25 @@ export function reconcileVote(optimistic, snapshot) {
   if (snapshot.version <= optimistic.baseVersion) return 'ignore';
   return snapshot.index === optimistic.toIndex ? 'confirm' : 'rollback';
 }
+
+/**
+ * Identity of one card close for its announcement (toast, match overlay): the room, the closed game
+ * and the version of the snapshot that closed it. A re-render, a repeated snapshot (POST + SSE),
+ * a reconnect or a resync never produce a new key; closing the same card again after an undo does.
+ */
+export function closeKey(roomCode, snapshot) {
+  const result = snapshot?.lastResult;
+  if (!result) return null;
+  return `${roomCode}|${result.gameId}|${snapshot.version}`;
+}
+
+/** Returns once(key): true the first time a key is seen, false for repeats and null keys. */
+export function createOnce(capacity = 32) {
+  const seen = new Set();
+  return (key) => {
+    if (key === null || key === undefined || seen.has(key)) return false;
+    seen.add(key);
+    if (seen.size > capacity) seen.delete(seen.values().next().value);
+    return true;
+  };
+}
