@@ -16,13 +16,14 @@ function gameOrStub(id) {
   return getGame(id) || { id, name: id, players: [1, 1], platforms: [], tags: [], pitch: '' };
 }
 
-export function renderVoting(room, myVote) {
-  const id = currentGameId(room.state);
+// `state` is what the screen shows: the server snapshot, or the optimistic view while a vote is in flight.
+export function renderVoting(room, state, myVote) {
+  const id = currentGameId(state);
   if (!id) return;
-  if (id !== renderedGameId) showGame(id, room.state);
-  renderMyVote(room, myVote);
-  if (room.isHost) renderVoters(room);
-  $('undoBtn').disabled = room.state.index === 0;
+  if (id !== renderedGameId) showGame(id, state);
+  renderMyVote(room, state, myVote);
+  if (room.isHost) renderVoters(room, state);
+  $('undoBtn').disabled = state.index === 0;
   showScreen('votingScreen');
 }
 
@@ -87,24 +88,24 @@ function votedCount(state) {
   return state.currentVoters.length;
 }
 
-function renderMyVote(room, myVote) {
+function renderMyVote(room, state, myVote) {
   $('voteLikeBtn').setAttribute('aria-pressed', String(myVote === 'like'));
   $('voteNopeBtn').setAttribute('aria-pressed', String(myVote === 'nope'));
   $('votePlayedBtn').setAttribute('aria-pressed', String(myVote === 'played'));
   $('voteBar').classList.toggle('has-vote', Boolean(myVote));
   showVoteStamp(myVote);
-  const count = `${votedCount(room.state)}/${room.state.players.length}`;
+  const count = `${votedCount(state)}/${state.players.length}`;
   $('voteStatus').textContent = myVote
     ? `Votaste ${VOTE_EMOJI[myVote]} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
     : `${room.isHost ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
 }
 
 // Shows who voted but never what they voted: the result is revealed when the card closes.
-function renderVoters(room) {
-  const voters = new Set(room.state.currentVoters);
-  const items = room.state.players.map((p) => voterItem(p, voters.has(p.id), p.id === room.session.playerId));
+function renderVoters(room, state) {
+  const voters = new Set(state.currentVoters);
+  const items = state.players.map((p) => voterItem(p, voters.has(p.id), p.id === room.session.playerId));
   $('voterList').replaceChildren(...items);
-  $('votersCount').textContent = `${votedCount(room.state)}/${room.state.players.length}`;
+  $('votersCount').textContent = `${votedCount(state)}/${state.players.length}`;
 }
 
 function voterItem(player, voted, isMe) {

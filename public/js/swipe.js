@@ -15,7 +15,6 @@ const PLAYED_OUT_MS = 700;
 const SPRING_MS = 320;
 const RETURN_MS = 300;
 const FADE_MS = 200; // upper bound of .card.fading (styles.css): .16s, or .2s with reduced motion
-const MEDIA_READY_MAX_MS = 250;
 const CLICK_SUPPRESS_MS = 350;
 const EASE_OUT = 'cubic-bezier(.22,.61,.36,1)';
 const SPRING = 'cubic-bezier(.175,.885,.32,1.275)';
@@ -32,7 +31,6 @@ let generation = 0; // bumps on every animation so a stale cleanup never undoes 
 let suppressClicksUntil = 0;
 
 const card = () => $('card');
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- painting ----------
@@ -160,6 +158,16 @@ export function playedOut() {
   return out;
 }
 
+/** Neutral quick exit for the optimistic advance when the own vote was "played" (the result decides later). */
+export function fadeAway() {
+  if (out) return out;
+  abortDrag();
+  setStamps(0, 0);
+  setUnderScale(1, FADE_MS);
+  out = fadeCard('0');
+  return out;
+}
+
 /** Brings a thrown card back (its vote failed, or did not close the card after all). */
 export function returnCard() {
   if (!out) return;
@@ -194,15 +202,13 @@ export function prepareNextCard() {
 }
 
 /**
- * Step 2: once the new media can paint, fade the card in over the identical-looking card
- * underneath, then drop the underneath back to the next-next game. Never an empty frame.
+ * Step 2: fade the card in over the identical-looking card underneath, then drop the underneath
+ * back to the next-next game. Never waits for media: the cover is already cached by the preview
+ * underneath and the trailer starts whenever it is ready.
  */
 export async function revealNextCard() {
   const el = card();
-  await mediaReady();
-  // Two frames: the hidden state must be rendered once, or the fade has no "from" to start at.
-  await nextFrame();
-  await nextFrame();
+  void el.offsetWidth; // commit the hidden state so the fade has a "from" without waiting for frames
   el.style.transition = '';
   el.classList.add('fading');
   el.style.opacity = '';
@@ -211,21 +217,6 @@ export async function revealNextCard() {
   out = null;
   setUnderScale(null);
   unfreezeUnder();
-}
-
-// rAF never fires in a hidden tab (TV tab in the background, locked phone): the timeout keeps the
-// close sequence (and room.busy) from hanging there.
-const nextFrame = () => Promise.race([new Promise((resolve) => requestAnimationFrame(() => resolve())), wait(50)]);
-
-// The first thing the card shows: the screenshot/header <img>, or the trailer's poster.
-function mediaReady() {
-  const img = $('mediaImg');
-  const video = $('video');
-  let probe = null;
-  if (!img.hidden && img.getAttribute('src')) probe = img;
-  else if (!video.hidden && video.poster) probe = Object.assign(new Image(), { src: video.poster });
-  if (!probe || typeof probe.decode !== 'function') return Promise.resolve();
-  return Promise.race([probe.decode().catch(() => {}), wait(MEDIA_READY_MAX_MS)]);
 }
 
 // ---------- gesture ----------

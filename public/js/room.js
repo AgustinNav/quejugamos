@@ -5,7 +5,8 @@ import { loadSession, saveSession, clearSession } from './store.js';
 import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
-import { flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
+import { fadeAway, flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
+import { reconcileVote } from './reconcile.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
@@ -24,6 +25,9 @@ export function enterRoom(code) {
   const room = {
     code, session: null, isHost: false, state: null, es: null, busy: false, disposed: false,
     // myVote: own vote on the open card ({ gameId, vote }); snapshots only say who voted, not what.
+    // optimistic: the last voter's advance shown before the server confirms ({ fromIndex, toIndex, gameId, vote, baseVersion }).
+    // closeRun invalidates a close animation when that advance is rolled back.
+    optimistic: null, closeRun: 0,
     pendingVote: null, myVote: null, retryTimer: null, stopKeepAlive: startKeepAlive(code), onVisible: null,
     // Stream reconnection: connectAttempt drops stale ticket requests, retries drives the backoff,
     // authRetries allows one re-ticket after a 401 before treating the session as gone.
@@ -267,8 +271,12 @@ export function applySnapshot(room, snapshot) {
     failRoom(room, 'kicked');
     return false;
   }
+  const verdict = room.optimistic ? reconcileVote(room.optimistic, snapshot) : null;
+  if (verdict === 'ignore') return false;
+  if (verdict === 'rollback') rollbackOptimistic(room);
   const prev = room.state;
   room.state = snapshot;
+  if (verdict === 'confirm') return settleOptimistic(room);
   if (!room.busy) render(room, prev);
   return true;
 }
@@ -284,26 +292,72 @@ function render(room, prev) {
 
 // The card leaves (thrown, or shrunk if most voters had played it), the next game is painted into it while
 // hidden over the identical card underneath, then it fades in. Snapshots arriving meanwhile are
-// kept (room.busy) and rendered at the end.
-async function animateClose(room) {
+// kept (room.busy) and rendered at the end. `leave` is the exit animation: the server result by default,
+// the own vote for an optimistic advance.
+async function animateClose(room, leave = () => leaveCard(room.state.lastResult)) {
   room.busy = true;
-  await leaveCard(room.state.lastResult);
+  const run = ++room.closeRun;
+  await leave();
   if (room.disposed) return void (room.busy = false);
+  if (run !== room.closeRun) return; // rolled back meanwhile: the rollback owns the card
   prepareNextCard();
   paint(room);
   await revealNextCard();
+  if (run !== room.closeRun) return;
   room.busy = false;
   if (!room.disposed) renderPhase(room);
 }
 
+function announceClose(result) {
+  if (!result.playedOut) return announceResult(result);
+  // Ranked apart as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
+  toast(`«${gameName(result.gameId)}» — la mayoría ya lo jugó`);
+}
+
 function leaveCard(result) {
-  if (result.playedOut) {
-    // Ranked apart as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
-    toast(`«${gameName(result.gameId)}» — la mayoría ya lo jugó`);
-    return playedOut();
-  }
-  announceResult(result);
+  announceClose(result);
+  if (result.playedOut) return playedOut();
   return flyOut(result.likes > result.nopes ? 'right' : 'left');
+}
+
+// ---------- optimistic advance ----------
+// The last missing voter does not wait for the round trip: the card leaves and deck[index + 1] (known
+// to every member) is painted from local data. The snapshot stays the source of truth; reconcileVote
+// decides whether it confirms the guess or undoes it.
+
+export function beginOptimisticAdvance(room, vote) {
+  const { index, version } = room.state;
+  room.optimistic = { fromIndex: index, toIndex: index + 1, gameId: currentGameId(room.state), vote, baseVersion: version };
+  animateClose(room, async () => {
+    await Promise.resolve(); // a swipe release throws the card with its own velocity right after this call
+    // Votes are hidden, so the result is unknown: "played" exits neutrally instead of guessing a stamp.
+    return vote === 'played' ? fadeAway() : flyOut(vote === 'like' ? 'right' : 'left');
+  });
+}
+
+// The server agrees the card closed: the screen is already right, only the data is synced.
+function settleOptimistic(room) {
+  room.optimistic = null;
+  if (room.state.lastResult) announceClose(room.state.lastResult);
+  if (!room.busy) renderPhase(room);
+  return true;
+}
+
+/** Undoes an optimistic advance (vote failed or the card did not close): previous card back, no fly. */
+export function rollbackOptimistic(room) {
+  if (!room.optimistic) return;
+  room.optimistic = null;
+  room.closeRun += 1;
+  room.busy = false;
+  resetCard();
+  paint(room); // room.state is still the card that was left
+}
+
+// What the screen shows: the server state, or one card ahead while an optimistic advance is pending.
+function viewState(room) {
+  const opt = room.optimistic;
+  if (!opt || room.state.index !== opt.fromIndex) return room.state;
+  return { ...room.state, index: opt.toIndex, currentVoters: [] };
 }
 
 export function renderPhase(room) {
@@ -312,7 +366,8 @@ export function renderPhase(room) {
 
 function paint(room) {
   if (room.disposed || !room.state) return;
-  const { phase, index, deck } = room.state;
+  const state = viewState(room);
+  const { phase, index, deck } = state;
   $('progress').hidden = phase !== 'voting';
   $('progress').textContent = `${Math.min(index + 1, deck.length)} / ${deck.length}`;
   if (phase !== 'voting') resetMedia();
@@ -320,16 +375,16 @@ function paint(room) {
   if (phase !== 'voting') forgetRenderedGame();
   syncRankingSheet(room.state);
   if (phase === 'lobby') return room.isHost ? renderHostLobby(room) : renderPlayerLobby(room);
-  if (phase === 'voting') return renderVoting(room, myVote(room));
+  if (phase === 'voting') return renderVoting(room, state, myVote(room, state));
   renderResults(room.state);
 }
 
-export function myVote(room) {
-  const gameId = currentGameId(room.state);
+export function myVote(room, state = room.state) {
+  const gameId = currentGameId(state);
   if (room.pendingVote?.gameId === gameId) return room.pendingVote.vote;
   // currentVoters is the authority on *whether* I voted (undo/kick clear votes server-side);
   // the locally kept vote only says which one.
-  if (!room.state.currentVoters?.includes(room.session.playerId)) return null;
+  if (!state.currentVoters?.includes(room.session.playerId)) return null;
   return room.myVote?.gameId === gameId ? room.myVote.vote : null;
 }
 

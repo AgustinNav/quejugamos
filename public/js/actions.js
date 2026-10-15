@@ -2,7 +2,9 @@
 import { $, toast } from './dom.js';
 import { api } from './api.js';
 import { errorMessage } from './errors.js';
-import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
+import {
+  activeRoom, applySnapshot, beginOptimisticAdvance, failRoom, refreshRoom, renderPhase, rollbackOptimistic, myVote, setMyVote,
+} from './room.js';
 import { currentGameId } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
 import { bindRankingSheet } from './ranking-sheet.js';
@@ -15,8 +17,9 @@ import { closesCard } from './gesture.js';
 const STALE_STATE_ERRORS = new Set(['not_current_game', 'not_voting']);
 
 // isCardOut: the own swipe threw the card and its vote is still in flight.
+// room.optimistic: the next card is already on screen but the server has not confirmed the advance.
 function canVote(room) {
-  return Boolean(room && !room.busy && room.session && room.state?.phase === 'voting' && !isCardOut());
+  return Boolean(room && !room.busy && !room.optimistic && room.session && room.state?.phase === 'voting' && !isCardOut());
 }
 
 async function handleActionError(room, err) {
@@ -34,12 +37,23 @@ function applyResponse(room, snapshot) {
   if (!applySnapshot(room, snapshot)) renderPhase(room);
 }
 
+// Only the last missing vote (and not the last card of the deck, whose next screen is the ranking,
+// which exists only once the server froze the results) advances the screen before the server answers.
+function advancesOptimistically(state, playerId) {
+  return closesCard(state, playerId) && state.index + 1 < state.deck.length;
+}
+
+// A failed request leaves the UI possibly ahead of or behind the server: refetch unless handleActionError does.
+const resyncsAfterError = (code) => code !== 'unauthorized' && !STALE_STATE_ERRORS.has(code);
+
 export async function castVote(vote) {
   const room = activeRoom();
   if (!canVote(room) || myVote(room) === vote) return;
   const gameId = currentGameId(room.state);
   room.pendingVote = { gameId, vote };
   renderPhase(room); // optimistic: the button lights up right away
+  if (advancesOptimistically(room.state, room.session.playerId)) beginOptimisticAdvance(room, vote);
+  const advance = room.optimistic;
   try {
     const { myVote: ownVote, ...snapshot } = await api.vote(room.code, room.session.playerToken, gameId, vote);
     room.pendingVote = null;
@@ -47,12 +61,16 @@ export async function castVote(vote) {
     applyResponse(room, snapshot);
   } catch (err) {
     room.pendingVote = null;
+    rollbackOptimistic(room);
     renderPhase(room);
     handleActionError(room, err);
+    if (resyncsAfterError(err.code)) refreshRoom(room);
   } finally {
-    // A thrown card whose vote did not close it (error, or someone joined meanwhile) comes back.
-    // When it did close, the room's close animation is running (busy) and owns the card.
-    if (!room.busy && !room.disposed) returnCard();
+    // Safety net: an advance the response did not settle must not leave the next card on screen.
+    if (advance && room.optimistic === advance) rollbackOptimistic(room);
+    // A thrown card (last card of the deck) whose vote did not close it comes back. When it did
+    // close, the room's close animation is running (busy) and owns the card.
+    if (!room.busy && !room.disposed && !room.optimistic) returnCard();
   }
 }
 
