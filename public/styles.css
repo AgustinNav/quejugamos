@@ -500,3 +500,81 @@ html { overscroll-behavior-x: none; }
   /* The card fades instead of flying; the global rule above would make the fade instant. */
   .card.fading { transition: opacity .2s linear !important; }
 }
+
+/* ===== CARD POLISH: link buttons, deal badge, PC requirements, "rejected by all" ===== */
+.links { gap: 10px; }
+.links .link-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 1 1 140px;
+  min-height: 48px; padding: 12px 18px; border-radius: 12px; border: 1px solid transparent;
+  font-size: 16px; font-weight: 700; color: #fff; text-decoration: none; cursor: pointer;
+  box-shadow: 0 2px 0 rgba(0,0,0,.35);
+  transition: transform .12s ease, filter .12s ease, box-shadow .12s ease;
+}
+.links .link-btn .link-icon { font-size: 18px; line-height: 1; }
+.links .link-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.links .link-btn:active { transform: translateY(1px); box-shadow: none; filter: brightness(.95); }
+.links .link-btn:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Primary CTA: the store, in Steam's blue, full width on its own row. */
+.links .link-btn.store { background: linear-gradient(180deg, #2a9fd6, #1a6fa0); border-color: #66c0f4; flex: 1 1 100%; font-size: 17px; }
+.links .link-btn.gameplay { background: #3b2a4d; border-color: #8a5fc0; }
+.links .link-btn.prices { background: #4a3a14; border-color: var(--gold); color: #ffe39a; }
+.links .link-btn.gameplay:hover { border-color: #b490e6; }
+.links .link-btn.prices:hover { border-color: #ffd873; }
+
+.deal-badge {
+  position: absolute; top: 12px; left: 12px; z-index: 6; padding: 6px 14px; border-radius: 999px;
+  font-size: 20px; font-weight: 800; letter-spacing: .5px; color: #fff; pointer-events: none;
+  background: linear-gradient(135deg, #ff3b4e, #ff8a3d); box-shadow: 0 4px 14px rgba(0,0,0,.55);
+  border: 2px solid rgba(255,255,255,.85);
+}
+.deal-badge.free { background: linear-gradient(135deg, #1fb866, #2fd17a); color: #04230f; }
+.deal-badge[hidden] { display: none; }
+.price .old { font-size: 15px; color: #c0c5d6; text-decoration-thickness: 2px; text-decoration-color: var(--nope); }
+.price .off {
+  display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 15px; font-weight: 800;
+  background: var(--like); color: #04230f;
+}
+
+.reqs { border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+.reqs[hidden] { display: none; }
+.reqs summary {
+  display: flex; align-items: center; min-height: 48px; padding: 0 16px; font-weight: 700; cursor: pointer; list-style: none;
+}
+.reqs summary::-webkit-details-marker { display: none; }
+.reqs summary::after { content: '▾'; margin-left: auto; color: var(--muted); transition: transform .15s ease; }
+.reqs[open] summary::after { transform: rotate(180deg); }
+.reqs summary:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 12px; }
+.reqs-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; padding: 0 16px 16px; }
+.req-group h4 { margin: 0 0 6px; font-size: 14px; color: var(--accent-2); text-transform: uppercase; letter-spacing: .5px; }
+.req-group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* Everyone who voted said nope: shake, then drop with the NOPE stamp. */
+.card.rejected-out {
+  transition: transform .55s cubic-bezier(.5,0,.9,.4) .3s, opacity .3s ease .55s;
+  animation: reject-shake .3s linear;
+}
+.card.rejected-out .stamp.nope { opacity: 1; }
+@keyframes reject-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-14px) rotate(-2deg); }
+  40% { transform: translateX(12px) rotate(2deg); }
+  60% { transform: translateX(-8px) rotate(-1deg); }
+  80% { transform: translateX(5px); }
+}
+.nope-overlay {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-content: center; justify-items: center; gap: 12px;
+  background: rgba(40,4,10,.8); text-align: center; padding: 16px; pointer-events: none;
+}
+.nope-overlay[hidden] { display: none; }
+.nope-overlay.play { animation: fade 1.5s ease forwards; }
+.nope-text {
+  font-size: clamp(40px, 8vw, 96px); font-weight: 800; color: var(--nope); letter-spacing: 4px;
+  border: 8px solid var(--nope); border-radius: 18px; padding: 4px 28px; transform: rotate(-6deg);
+}
+.nope-overlay.play .nope-text { animation: pop .45s cubic-bezier(.2,1.6,.4,1); }
+.nope-overlay p { font-size: clamp(18px, 3vw, 26px); margin: 0; }
+body.is-phone .links .link-btn { min-height: 52px; }
+@media (prefers-reduced-motion: reduce) {
+  .nope-overlay.play { animation-duration: 1.5s !important; }
+  .links .link-btn { transition: none !important; }
+}

@@ -12,6 +12,7 @@ import {
 import { freezeUnder, unfreezeUnder } from './stack.js';
 
 const PLAYED_OUT_MS = 700;
+const REJECTED_OUT_MS = 850; // .card.rejected-out: .3s shake + .55s drop
 const SPRING_MS = 320;
 const RETURN_MS = 300;
 const FADE_MS = 200; // upper bound of .card.fading (styles.css): .16s, or .2s with reduced motion
@@ -105,7 +106,7 @@ export function resetCard() {
   ++generation;
   abortDrag();
   out = null;
-  el.classList.remove('moving', 'fading', 'played-out');
+  el.classList.remove('moving', 'fading', 'played-out', 'rejected-out');
   el.style.transition = '';
   el.style.opacity = '';
   applyOffset(REST);
@@ -158,6 +159,27 @@ export function playedOut() {
   return out;
 }
 
+/** Everyone who voted said nope: the card shakes, then drops with a NOPE stamp (styles.css owns the timing). */
+export function rejectedOut() {
+  if (out) return out;
+  abortDrag();
+  setStamps(0, 1);
+  if (reducedMotion()) {
+    setUnderScale(1);
+    out = fadeCard('0');
+    return out;
+  }
+  const el = card();
+  ++generation;
+  el.style.transition = '';
+  el.classList.add('rejected-out');
+  el.style.transform = 'translateY(70vh) rotate(-6deg) scale(.9)';
+  el.style.opacity = '0';
+  setUnderScale(1, REJECTED_OUT_MS);
+  out = afterTransition(el, 'transform', REJECTED_OUT_MS);
+  return out;
+}
+
 /** Neutral quick exit for the optimistic advance when the own vote was "played" (the result decides later). */
 export function fadeAway() {
   if (out) return out;
@@ -194,7 +216,7 @@ export function prepareNextCard() {
   const el = card();
   ++generation;
   freezeUnder();
-  el.classList.remove('moving', 'played-out', 'fading', 'dragging');
+  el.classList.remove('moving', 'played-out', 'rejected-out', 'fading', 'dragging');
   el.style.transition = 'none';
   el.style.opacity = '0';
   applyOffset(REST);

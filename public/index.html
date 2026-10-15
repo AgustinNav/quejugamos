@@ -136,6 +136,7 @@
       <div class="stamp played" aria-hidden="true">YA JUGADO ✅</div>
       <div class="media" id="media">
         <video id="video" playsinline muted loop></video>
+        <span class="deal-badge" id="dealBadge" hidden></span>
         <img id="mediaImg" alt="">
         <div class="media-actions" id="mediaActions">
           <button class="btn gallery-btn" type="button" id="galleryBtn" title="Galería (G)" hidden>🖼 Galería</button>
@@ -154,6 +155,10 @@
         <div class="tags" id="gameTags"></div>
         <p class="pitch" id="gamePitch"></p>
         <p class="steam-desc" id="gameSteamDesc"></p>
+        <details class="reqs" id="gameReqs" hidden>
+          <summary>💻 Requisitos de PC</summary>
+          <div class="reqs-body" id="gameReqsBody"></div>
+        </details>
         <div class="links" id="gameLinks"></div>
       </div>
     </article>
@@ -233,6 +238,11 @@
   <div class="match-overlay" id="matchOverlay" hidden>
     <div class="match-text">IT'S A MATCH 💘</div>
     <p id="matchGame"></p>
+  </div>
+
+  <div class="nope-overlay" id="nopeOverlay" hidden aria-hidden="true">
+    <div class="nope-text">NOPE 💀</div>
+    <p id="nopeGame"></p>
   </div>
 
   <dialog class="gallery" id="gallery" aria-modal="true" aria-labelledby="galleryTitle">

@@ -5,12 +5,12 @@ import { loadSession, saveSession, clearSession } from './store.js';
 import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
-import { fadeAway, flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
+import { fadeAway, flyOut, playedOut, prepareNextCard, rejectedOut, resetCard, revealNextCard } from './swipe.js';
 import { reconcileVote } from './reconcile.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
-import { renderVoting, forgetRenderedGame, announceResult, currentGameId, gameName } from './views/voting.js';
+import { renderVoting, forgetRenderedGame, announceResult, isRejectedByAll, currentGameId, gameName } from './views/voting.js';
 import { renderResults } from './views/results.js';
 import { closeRankingSheet, syncRankingSheet } from './ranking-sheet.js';
 
@@ -317,6 +317,7 @@ function announceClose(result) {
 function leaveCard(result) {
   announceClose(result);
   if (result.playedOut) return playedOut();
+  if (isRejectedByAll(result)) return rejectedOut();
   return flyOut(result.likes > result.nopes ? 'right' : 'left');
 }
 
