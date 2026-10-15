@@ -107,6 +107,7 @@ function renderAudio({ muted, volume, adjustable }) {
   button.setAttribute('aria-label', muted ? 'Activar sonido del trailer' : 'Silenciar trailer');
   const slider = $('volumeSlider');
   slider.value = String(muted ? 0 : percent);
+  slider.style.setProperty('--fill', `${muted ? 0 : percent}%`); // filled track (styles.css)
   slider.setAttribute('aria-valuetext', muted ? 'Silenciado' : `Volumen ${percent}%`);
   slider.hidden = !hasTrailer || !adjustable; // Web Audio can fail late (iOS): then mute-only
   applyAudio($('video'));

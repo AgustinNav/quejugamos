@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clampVolume, initialAudioState, parseStoredVolume, steppedVolume, syncedFromElement, toggledMute,
+  clampVolume, initialAudioState, levelFromGain, outputGain, parseStoredVolume, steppedVolume, syncedFromElement, toggledMute,
   UNMUTE_VOLUME, withVolume,
 } from '../public/js/volume.js';
 
@@ -61,6 +61,36 @@ describe('trailer volume rules', () => {
   test('native controls: unmuting at 0 gets the default; iOS keeps our level', () => {
     assert.deepEqual(syncedFromElement({ muted: true, volume: 0 }, { muted: false, volume: 0 }, true), { muted: false, volume: 0.5 });
     assert.deepEqual(syncedFromElement({ muted: true, volume: 0.3 }, { muted: false, volume: 1 }, false), { muted: false, volume: 0.3 });
-    assert.deepEqual(syncedFromElement({ muted: false, volume: 0.3 }, { muted: false, volume: 0.9 }, true), { muted: false, volume: 0.9 });
+    // The element holds the gain (0.9 ≈ position 0.95), not the slider position.
+    assert.deepEqual(syncedFromElement({ muted: false, volume: 0.3 }, { muted: false, volume: 0.9 }, true), { muted: false, volume: 0.95 });
+  });
+
+  test('perceptual curve: the low end of the slider is quiet, 50 % is -12 dB', () => {
+    const db = (gain: number) => 20 * Math.log10(gain);
+    assert.equal(outputGain(0), 0);
+    assert.equal(outputGain(1), 1);
+    assert.equal(outputGain(UNMUTE_VOLUME), 0.25);
+    assert.ok(db(outputGain(0.1)) <= -39, 'slider 10 % is at least ~40 dB down');
+    assert.ok(db(outputGain(0.05)) <= -50, 'the first step above mute is barely audible');
+    for (let v = 0.05; v <= 1; v += 0.05) assert.ok(outputGain(v) < outputGain(v + 0.05) || v + 0.05 > 1, 'monotonic');
+    assert.equal(outputGain(7), 1);
+    assert.equal(outputGain(Number.NaN), 0);
+  });
+
+  test('levelFromGain inverts outputGain on every slider step and tolerates junk', () => {
+    for (let step = 0; step <= 100; step += 5) {
+      const v = step / 100;
+      assert.equal(levelFromGain(outputGain(v)), v, `step ${step}`);
+    }
+    for (const junk of [Number.NaN, -1, Number.NEGATIVE_INFINITY]) assert.equal(levelFromGain(junk), 0);
+    assert.equal(levelFromGain(Number.POSITIVE_INFINITY), 0);
+    assert.equal(levelFromGain(4), 1);
+  });
+
+  test('our own write to the element (volumechange echo) never moves the slider', () => {
+    for (let step = 5; step <= 100; step += 5) {
+      const state = { muted: false, volume: step / 100 };
+      assert.deepEqual(syncedFromElement(state, { muted: false, volume: outputGain(state.volume) }, true), state, `step ${step}`);
+    }
   });
 });
