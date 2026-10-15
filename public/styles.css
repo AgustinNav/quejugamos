@@ -243,12 +243,15 @@ kbd {
   font: inherit; font-size: 34px; min-height: 64px; border-radius: 18px; cursor: pointer;
   background: transparent; border: 2px solid var(--border); color: var(--text);
   transition: transform .1s, background .15s, border-color .15s;
+  /* Same box for all three (emoji over label), so the row lines up whatever the label length. */
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  line-height: 1; touch-action: manipulation;
 }
 .vote-btn:active { transform: scale(.95); }
 .vote-btn.like { border-color: var(--like); }
 .vote-btn.nope { border-color: var(--nope); }
 .vote-btn.played { border-color: var(--gold); }
-.vote-label { display: block; font-size: 13px; line-height: 1.2; margin-top: 2px; }
+.vote-label { display: block; font-size: 13px; line-height: 1.2; white-space: nowrap; }
 .vote-btn.like[aria-pressed="true"] { background: rgba(47,209,122,.25); box-shadow: 0 0 0 2px var(--like); }
 .vote-btn.nope[aria-pressed="true"] { background: rgba(255,79,94,.25); box-shadow: 0 0 0 2px var(--nope); }
 .vote-btn.played[aria-pressed="true"] { background: rgba(255,197,66,.25); box-shadow: 0 0 0 2px var(--gold); }
@@ -303,31 +306,23 @@ kbd {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
   max-width: min(92vw, 520px); padding: 12px 18px; border-radius: 12px;
   background: var(--panel-2); border: 1px solid var(--accent); box-shadow: 0 10px 30px rgba(0,0,0,.5);
-  animation: pop-in .2s ease;
+  animation: toast-in .2s ease;
+  pointer-events: none; /* informational only: never swallow a click on the vote buttons under it */
 }
+/* Own keyframes: pop-in animates `transform`, which would drop the centering translate mid-animation. */
+@keyframes toast-in { from { transform: translateX(-50%) scale(.85); opacity: 0; } }
 
-/* PHONE PLAYER LAYOUT */
-body.is-phone #votingScreen {
-  grid-template-columns: 1fr; gap: 12px; padding: 12px 12px 190px; max-width: 560px;
-}
-body.is-phone .shots, body.is-phone .host-only, body.is-phone .tags,
-body.is-phone .steam-desc, body.is-phone .pill.extra { display: none !important; }
-body.is-phone .card-body { padding: 16px; gap: 10px; }
-/* Phones: the side panel only holds the fixed vote bar. */
-body.is-phone .side { padding: 0; border: 0; background: none; }
-body.is-phone .title-row h2 { font-size: 24px; }
-body.is-phone .price { font-size: 16px; }
-body.is-phone .pitch { font-size: 16px; }
-body.is-phone .stamp { font-size: 30px; top: 16px; }
-body.is-phone .stamp.like { left: 16px; }
-body.is-phone .stamp.nope { right: 16px; }
-body.is-phone .vote-bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
-  background: linear-gradient(transparent, var(--bg) 22%); padding-top: 28px;
-}
-body.is-phone .vote-btn { min-height: 88px; font-size: 40px; padding: 0 4px; }
+/* Role vs layout: body.is-host / body.is-phone say who you are (host-only controls, permissions);
+   the layout follows the viewport. A friend on a PC gets the desktop layout, a host on a phone the
+   compact one with the host panel still there. */
+body:not(.is-host) .host-only { display: none !important; }
 .host-only { display: block; }
+
+/* Wide: the own vote sits right under the room actions, above the host's voter list, so it is
+   always in view next to the card and never below a long list of names. */
+.side .finish-row { order: 0; }
+.side .vote-bar { order: 1; }
+.side .voters { order: 2; }
 
 @media (max-width: 960px) {
   .topbar { padding: 12px 16px; flex-wrap: wrap; }
@@ -337,7 +332,18 @@ body.is-phone .vote-btn { min-height: 88px; font-size: 40px; padding: 0 4px; }
   .ranking img, .ranking .thumb-ph { width: 100%; }
   .ranking li > :nth-child(3), .ranking li > :nth-child(4) { grid-column: 1 / -1; text-align: left; justify-items: start; }
   #resultsScreen { padding: 16px; }
+  /* Single column: the card fills the screen, so the vote bar is pinned to the bottom (any role). */
+  #votingScreen { padding-bottom: calc(190px + env(safe-area-inset-bottom)); }
+  .vote-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; max-width: 600px; margin: 0 auto;
+    padding: 28px 16px calc(14px + env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, var(--bg) 22%);
+  }
+  .vote-btn { min-height: 88px; font-size: 40px; padding: 0 4px; }
+  /* The played toast lands right when people vote the next card: keep it above the fixed vote bar. */
+  body:has(#votingScreen:not([hidden])) .toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
 }
+
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -353,9 +359,6 @@ body.is-phone .vote-btn { min-height: 88px; font-size: 40px; padding: 0 4px; }
 /* Majority had played it: stamp shows first, then the card shrinks and fades (not a LIKE/NOPE swipe). */
 .card.played-out { transition: transform .7s ease, opacity .35s ease .35s; }
 .card.played-out .stamp.played { opacity: 1; }
-body.is-phone .stamp.played { font-size: 26px; }
-/* The played toast lands right when people vote the next card: keep it above the fixed vote bar. */
-body.is-phone .toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
 .played-group { margin-top: 24px; }
 .played-group h3 { margin: 0 0 8px; font-size: 17px; }
 .played-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -377,13 +380,27 @@ body.is-phone .toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
   min-height: 44px; padding: 8px 14px; font-size: 15px;
   background: rgba(0,0,0,.6); border-color: rgba(255,255,255,.2);
 }
+/* Fully custom range: the native one draws its track off-centre inside a padded pill and differs
+   per browser. The whole 44px pill is the hit area (a thumb can grab it on phones); --fill is the
+   level, set from audio state (media.js / gallery.js). Horizontal drags here are the slider's, never the card's. */
 .volume-slider {
-  width: 120px; min-height: 44px; padding: 0 12px; border-radius: 999px; cursor: pointer;
-  background: rgba(0,0,0,.6); accent-color: var(--accent);
+  -webkit-appearance: none; appearance: none; margin: 0; box-sizing: border-box;
+  width: 140px; height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  background: rgba(0,0,0,.6); touch-action: none;
 }
-/* Phones get the slider too (iOS through Web Audio, see audio.js): longer track and a 44px
-   hit area so a thumb can grab it. Horizontal drags here are the slider's, never the card's. */
-body.is-phone .volume-slider { width: 140px; min-height: 48px; touch-action: none; }
+.volume-slider::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), rgba(255,255,255,.35) var(--fill, 0%));
+}
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -7px;
+  border-radius: 50%; background: var(--accent); border: 2px solid #fff;
+}
+.volume-slider::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,.35); }
+.volume-slider::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
+.volume-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
+.volume-slider:focus-visible { box-shadow: var(--focus); }
+
 .gallery-volume { flex: none; width: 140px; }
 @media (max-width: 600px) { .gallery-volume { width: 96px; } }
 body.gallery-open { overflow: hidden; }
@@ -449,7 +466,6 @@ body.gallery-open { overflow: hidden; }
 /* Ending the vote is the host's call; players only get the partial ranking. */
 body:not(.is-host) .finish-btn, body:not(.is-host) .resume-voting-btn { display: none !important; }
 .finish-btn { border-color: var(--gold); color: var(--gold); }
-body.is-phone .finish-row .btn { flex: 1 1 100%; }
 
 .ranking-sheet {
   width: min(960px, 100%); max-width: 100%; max-height: min(88vh, 900px); margin: auto auto 0;
@@ -492,11 +508,130 @@ body.is-phone .finish-row .btn { flex: 1 1 100%; }
 .under-media { position: relative; aspect-ratio: 16 / 9; background: linear-gradient(135deg, #3a1d4a, #1d2b4a); }
 .under-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .under-name { margin: 0; padding: 20px 24px; font-size: 32px; font-weight: 700; line-height: 1.1; }
-body.is-phone .under-name { padding: 16px; font-size: 24px; }
 /* No horizontal overscroll (bounce / history swipe on trackpads) fighting the card swipe. */
 html { overscroll-behavior-x: none; }
 
 @media (prefers-reduced-motion: reduce) {
   /* The card fades instead of flying; the global rule above would make the fade instant. */
   .card.fading { transition: opacity .2s linear !important; }
+}
+
+/* ===== CARD POLISH: link buttons, deal badge, PC requirements, "rejected by all" ===== */
+.links { gap: 10px; }
+.links .link-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 1 1 140px;
+  min-height: 48px; padding: 12px 18px; border-radius: 12px; border: 1px solid transparent;
+  font-size: 16px; font-weight: 700; color: #fff; text-decoration: none; cursor: pointer;
+  box-shadow: 0 2px 0 rgba(0,0,0,.35);
+  transition: transform .12s ease, filter .12s ease, box-shadow .12s ease;
+}
+.links .link-btn .link-icon { font-size: 18px; line-height: 1; }
+.links .link-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.links .link-btn:active { transform: translateY(1px); box-shadow: none; filter: brightness(.95); }
+.links .link-btn:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Primary CTA: the store, in Steam's blue, full width on its own row. */
+.links .link-btn.store { background: linear-gradient(180deg, #2a9fd6, #1a6fa0); border-color: #66c0f4; flex: 1 1 100%; font-size: 17px; }
+.links .link-btn.gameplay { background: #3b2a4d; border-color: #8a5fc0; }
+.links .link-btn.prices { background: #4a3a14; border-color: var(--gold); color: #ffe39a; }
+.links .link-btn.gameplay:hover { border-color: #b490e6; }
+.links .link-btn.prices:hover { border-color: #ffd873; }
+
+.deal-badge {
+  position: absolute; top: 12px; left: 12px; z-index: 6; padding: 6px 14px; border-radius: 999px;
+  font-size: 20px; font-weight: 800; letter-spacing: .5px; color: #fff; pointer-events: none;
+  background: linear-gradient(135deg, #ff3b4e, #ff8a3d); box-shadow: 0 4px 14px rgba(0,0,0,.55);
+  border: 2px solid rgba(255,255,255,.85);
+}
+.deal-badge.free { background: linear-gradient(135deg, #1fb866, #2fd17a); color: #04230f; }
+.deal-badge[hidden] { display: none; }
+.price .old { font-size: 15px; color: #c0c5d6; text-decoration-thickness: 2px; text-decoration-color: var(--nope); }
+.price .off {
+  display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 15px; font-weight: 800;
+  background: var(--like); color: #04230f;
+}
+
+.reqs { border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+.reqs[hidden] { display: none; }
+.reqs summary {
+  display: flex; align-items: center; min-height: 48px; padding: 0 16px; font-weight: 700; cursor: pointer; list-style: none;
+}
+.reqs summary::-webkit-details-marker { display: none; }
+.reqs summary::after { content: '▾'; margin-left: auto; color: var(--muted); transition: transform .15s ease; }
+.reqs[open] summary::after { transform: rotate(180deg); }
+.reqs summary:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 12px; }
+.reqs-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; padding: 0 16px 16px; }
+.req-group h4 { margin: 0 0 6px; font-size: 14px; color: var(--accent-2); text-transform: uppercase; letter-spacing: .5px; }
+.req-group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* Everyone who voted said nope: shake, then drop with the NOPE stamp. */
+.card.rejected-out {
+  transition: transform .55s cubic-bezier(.5,0,.9,.4) .3s, opacity .3s ease .55s;
+  animation: reject-shake .3s linear;
+}
+.card.rejected-out .stamp.nope { opacity: 1; }
+@keyframes reject-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-14px) rotate(-2deg); }
+  40% { transform: translateX(12px) rotate(2deg); }
+  60% { transform: translateX(-8px) rotate(-1deg); }
+  80% { transform: translateX(5px); }
+}
+.nope-overlay {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-content: center; justify-items: center; gap: 12px;
+  background: rgba(40,4,10,.8); text-align: center; padding: 16px; pointer-events: none;
+}
+.nope-overlay[hidden] { display: none; }
+.nope-overlay.play { animation: fade 1.5s ease forwards; }
+.nope-text {
+  font-size: clamp(40px, 8vw, 96px); font-weight: 800; color: var(--nope); letter-spacing: 4px;
+  border: 8px solid var(--nope); border-radius: 18px; padding: 4px 28px; transform: rotate(-6deg);
+}
+.nope-overlay.play .nope-text { animation: pop .45s cubic-bezier(.2,1.6,.4,1); }
+.nope-overlay p { font-size: clamp(18px, 3vw, 26px); margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .nope-overlay.play { animation-duration: 1.5s !important; }
+  .links .link-btn { transition: none !important; }
+}
+
+/* ===== Ranking UX: sort/filter bar + export ===== */
+.rank-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 16px; }
+.rank-tools[hidden], .rank-export[hidden], .rank-filtered-empty[hidden] { display: none; }
+.rank-sort { display: flex; align-items: center; gap: 8px; }
+.rank-sort label { color: var(--muted); font-size: 14px; }
+.rank-sort select {
+  font: inherit; min-height: 48px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+}
+.rank-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.rank-filters .toggle { min-height: 48px; }
+.rank-count { margin: 0; font-size: 14px; }
+.rank-count:empty { display: none; }
+.rank-filtered-empty { margin-top: 16px; padding: 18px; text-align: center; border-radius: 14px; border: 1px dashed var(--border); }
+.rank-filtered-empty p { margin: 0 0 10px; color: var(--muted); }
+.rank-filtered-empty .btn, .rank-export .btn { min-height: 48px; }
+.rank-export { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+@media (max-width: 960px) {
+  .rank-sort { width: 100%; }
+  .rank-sort select { flex: 1; }
+  .rank-export .btn { flex: 1 1 100%; }
+}
+
+/* COMPACT (phone) LAYOUT: last in the file so it overrides the base rules above. */
+@media (max-width: 760px) {
+  #votingScreen { gap: 12px; padding: 12px 12px calc(190px + env(safe-area-inset-bottom)); max-width: 560px; }
+  .shots, .tags, .steam-desc, .pill.extra { display: none !important; }
+  .card-body { padding: 16px; gap: 10px; }
+  /* Players: the side panel only holds the partial ranking button and the fixed vote bar. */
+  body:not(.is-host) .side { padding: 0; border: 0; background: none; }
+  .title-row h2 { font-size: 24px; }
+  .price { font-size: 16px; }
+  .pitch { font-size: 16px; }
+  .stamp { font-size: 30px; top: 16px; }
+  .stamp.like { left: 16px; }
+  .stamp.nope { right: 16px; }
+  .stamp.played { font-size: 26px; }
+  .under-name { padding: 16px; font-size: 24px; }
+  .finish-row .btn { flex: 1 1 100%; }
+  .volume-slider { height: 48px; }
+  .links .link-btn { min-height: 52px; }
 }

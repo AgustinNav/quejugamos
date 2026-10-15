@@ -92,6 +92,8 @@ Env vars: tabla en `README.md`.
 
 Lecciones universales van al Master, no acá.
 
+- **2026-10-14 — Pausar una sala congelaba a todos (en producción desde el PR #4).** `renderUnvoted` se re-renderizaba después de `loadMany` y volvía a pedir los ids todavía sin detalles. Los juegos sin `steamId` resuelven `null` en el mismo microtask y nunca tienen detalles, así que se armaba un loop infinito de microtasks: pestaña colgada, sin error en consola. Los tests no lo cubrían porque las views no tienen tests con DOM; apareció recién en el check en browser (PR #6). **Regla:** un re-render disparado por una carga async nunca vuelve a cargar los mismos ids; se registran como intentados (`idsToFetch`). Si en el check en browser se cuelgan varias pestañas a la vez, sospechá primero de nuestro código y no del panel.
+
 - **2026-10-12 — Trailers sonando por los parlantes de Agus.** Subagentes que probaban la galería abrieron pestañas ocultas y reprodujeron trailers con audio; Agus tuvo que preguntar de dónde venía el sonido y pedir que se cerraran todas. **Regla:** browser solo avisando antes, visible y con todo el media muted (ver Verificación §4).
 - **2026-10-09 — `log()` indefinido detrás de `LOG_PROXY_HEADERS`.** Con el flag en `1`, crear una sala daba 500 por `ReferenceError`; type stripping no lo detectó y ningún test activaba el flag (`fbdd689`). **Regla:** todo flag de config tiene un test que lo enciende; los loggers se inyectan, no se referencian globales; `npm run typecheck` en CI.
 - **2026-10-09 — Worktrees de agentes commiteados como gitlinks.** `git add -A` sumó `.claude/worktrees/*` como submódulos rotos. **Regla:** `.claude/worktrees/` en `.gitignore` y `git status` antes de cada `git add`.
