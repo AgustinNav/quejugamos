@@ -3,11 +3,25 @@
 // Logs are the source of truth: Render wipes memory on every spin-down, so in-process counters lie.
 //
 //   node scripts/metrics-from-logs.mjs < render-logs.txt
+//   node scripts/metrics-from-logs.mjs --exclude=ABC123,XYZ789 < render-logs.txt
+//
+// Test rooms (owner's recordings, smoke tests) are excluded by code: the codes listed in
+// scripts/excluded-rooms.txt (one per line, # comments) plus any passed with --exclude.
 //
 // Accepts lines as exported or copied from Render: anything before the first "{" (a timestamp
 // prefix) is ignored, and so are lines that are not a JSON object or carry no `time`.
 // Days are UTC (the `time` field is ISO 8601 in UTC).
-import { pathToFileURL } from 'node:url';
+import fs from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const EXCLUDED_ROOMS_FILE = fileURLToPath(new URL('./excluded-rooms.txt', import.meta.url));
+
+/** Room codes from a text list: one per line (or comma-separated), `#` starts a comment, case-insensitive. */
+export function parseRoomList(text) {
+  return new Set(
+    text.split(/[\r\n,]+/).map((item) => item.replace(/#.*/, '').trim().toUpperCase()).filter(Boolean),
+  );
+}
 
 function parseLine(line) {
   const start = line.indexOf('{');
@@ -46,11 +60,12 @@ function record(days, entry) {
 }
 
 /** Aggregates log lines into one row per UTC day, sorted by day. */
-export function summarize(lines) {
+export function summarize(lines, { excludeRooms = new Set() } = {}) {
   const days = new Map();
   for (const line of lines) {
     const entry = parseLine(line);
-    if (entry) record(days, entry);
+    const excluded = typeof entry?.roomCode === 'string' && excludeRooms.has(entry.roomCode.toUpperCase());
+    if (entry && !excluded) record(days, entry);
   }
   return [...days.keys()].sort().map((date) => {
     const day = days.get(date);
@@ -89,7 +104,19 @@ async function readStdin() {
   return text;
 }
 
+function excludedRooms(argv) {
+  let fromFile = new Set();
+  try {
+    fromFile = parseRoomList(fs.readFileSync(EXCLUDED_ROOMS_FILE, 'utf8'));
+  } catch {
+    // No list file: nothing excluded by default.
+  }
+  const flag = argv.find((arg) => arg.startsWith('--exclude='));
+  const fromFlag = flag ? parseRoomList(flag.slice('--exclude='.length)) : new Set();
+  return new Set([...fromFile, ...fromFlag]);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const rows = summarize((await readStdin()).split(/\r?\n/));
+  const rows = summarize((await readStdin()).split(/\r?\n/), { excludeRooms: excludedRooms(process.argv) });
   process.stdout.write(process.argv.includes('--json') ? `${JSON.stringify(rows, null, 2)}\n` : formatSummary(rows));
 }
