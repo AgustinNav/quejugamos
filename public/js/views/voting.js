@@ -100,8 +100,11 @@ function renderMyVote(room, state, myVote) {
   const count = `${votedCount(state)}/${state.players.length}`;
   $('voteStatus').textContent = myVote
     ? `Votaste ${VOTE_EMOJI[myVote]} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
-    : `${room.isHost ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
+    : `${hasKeyboardAndMouse() ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
 }
+
+// The hint follows the device, not the role: friends on a PC have the same keys as the host.
+const hasKeyboardAndMouse = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 // Shows who voted but never what they voted: the result is revealed when the card closes.
 function renderVoters(room, state) {
