@@ -1,4 +1,5 @@
-// Voting screen. Host and phone share this DOM; body.is-host / body.is-phone switch the layout.
+// Voting screen. Host and players share this DOM: body.is-host gates the host controls, the
+// layout follows the viewport (media queries in styles.css).
 import { $, esc, showScreen, announce, kickButton, toast } from '../dom.js';
 import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks, dealInfo, pcRequirements } from '../catalog.js';
 import { renderMedia } from '../media.js';
@@ -9,7 +10,11 @@ const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
 
 let renderedGameId = null;
 let matchTimer = null;
+let matchUntil = 0;
+const MATCH_MS = 1800; // .match-overlay.play animation (styles.css)
 let rejectTimer = null;
+let rejectUntil = 0;
+const REJECT_MS = 1500; // .nope-overlay.play animation (styles.css)
 
 export const currentGameId = (state) => state.deck[state.index] ?? null;
 
@@ -141,8 +146,11 @@ function renderMyVote(room, state, myVote) {
   const count = `${votedCount(state)}/${state.players.length}`;
   $('voteStatus').textContent = myVote
     ? `Votaste ${VOTE_EMOJI[myVote]} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
-    : `${room.isHost ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
+    : `${hasKeyboardAndMouse() ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
 }
+
+// The hint follows the device, not the role: friends on a PC have the same keys as the host.
+const hasKeyboardAndMouse = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 // Shows who voted but never what they voted: the result is revealed when the card closes.
 function renderVoters(room, state) {
@@ -176,7 +184,14 @@ export function showMatch(gameName) {
   overlay.classList.add('play');
   announce(`¡Match! ${gameName} les gusta a todos.`);
   clearTimeout(matchTimer);
-  matchTimer = setTimeout(() => { overlay.hidden = true; }, 1800);
+  matchUntil = Date.now() + MATCH_MS;
+  matchTimer = setTimeout(hideMatch, MATCH_MS);
+}
+
+function hideMatch() {
+  clearTimeout(matchTimer);
+  matchTimer = null;
+  $('matchOverlay').hidden = true;
 }
 
 /** Everyone who voted said nope (and the card was not ranked apart as already played). */
@@ -189,10 +204,24 @@ export function showRejected(gameName) {
   overlay.classList.remove('play');
   void overlay.offsetWidth; // restart the CSS animation
   overlay.classList.add('play');
-  toast('Nadie lo quiere 💀'); // role=alert: also what screen readers get
+  toast('Nadie lo quiere 💀', { ms: 3000 }); // role=alert: also what screen readers get
   clearTimeout(rejectTimer);
-  rejectTimer = setTimeout(() => { overlay.hidden = true; }, 1500);
+  rejectUntil = Date.now() + REJECT_MS;
+  rejectTimer = setTimeout(hideRejected, REJECT_MS);
 }
+
+function hideRejected() {
+  clearTimeout(rejectTimer);
+  rejectTimer = null;
+  $('nopeOverlay').hidden = true;
+}
+
+// Same as the toast (dom.js): a throttled timer in a hidden tab must not leave an overlay over the next card.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (matchTimer && Date.now() >= matchUntil) hideMatch();
+  if (rejectTimer && Date.now() >= rejectUntil) hideRejected();
+});
 
 export function announceResult(result) {
   const game = gameOrStub(result.gameId);

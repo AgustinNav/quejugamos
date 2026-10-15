@@ -19,6 +19,8 @@ import type { ApiDeps, Handler, RouteContext } from './routes.ts';
 import { createIndexRenderer, robotsTxt, sitemapXml } from './seo.ts';
 import { SseHub } from './sse.ts';
 import type { SseHubOptions } from './sse.ts';
+import { cacheControlFor, createFileCache, etagMatches, strongEtag } from './static-cache.ts';
+import type { CachedFile } from './static-cache.ts';
 import { SteamClient } from './steam.ts';
 import { StreamTicketStore } from './tickets.ts';
 import type { UpstreamQueue } from './upstream-queue.ts';
@@ -127,28 +129,46 @@ function buildDeps(config: AppConfig, options: AppOptions, log: Logger): ApiDeps
   };
 }
 
-function serveFile(req: IncomingMessage, res: ServerResponse, filePath: string): void {
-  fs.readFile(filePath, (err, content) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
-    res.end(req.method === 'HEAD' ? undefined : content);
-  });
+type FileReader = (filePath: string) => Promise<CachedFile>;
+
+/** 304 for a matching validator, otherwise the body. Security headers were set earlier with setHeader, so both carry them. */
+function sendCacheable(req: IncomingMessage, res: ServerResponse, type: string, cacheControl: string, file: { etag: string; content: string | Buffer }): void {
+  const headers = { 'Cache-Control': cacheControl, ETag: file.etag };
+  if (etagMatches(req.headers['if-none-match'], file.etag)) return void res.writeHead(304, headers).end();
+  res.writeHead(200, { ...headers, 'Content-Type': type });
+  res.end(req.method === 'HEAD' ? undefined : file.content);
 }
 
-type IndexRenderer = () => Promise<string>;
-
-async function serveIndex(req: IncomingMessage, res: ServerResponse, renderIndex: IndexRenderer): Promise<void> {
-  let html: string;
+async function serveFile(req: IncomingMessage, res: ServerResponse, filePath: string, readFile: FileReader): Promise<void> {
+  let file: CachedFile;
   try {
-    html = await renderIndex();
+    file = await readFile(filePath);
   } catch {
     return void res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
   }
-  res.writeHead(200, { 'Content-Type': MIME['.html'] });
-  res.end(req.method === 'HEAD' ? undefined : html);
+  sendCacheable(req, res, MIME[path.extname(filePath)] || 'application/octet-stream', cacheControlFor(filePath), file);
+}
+
+type IndexRenderer = () => Promise<{ html: string; etag: string }>;
+
+/** Wraps the SEO renderer so the rendered page's ETag is hashed once per render, not per request. */
+function withEtag(render: () => Promise<string>): IndexRenderer {
+  let last = { html: '', etag: strongEtag('') };
+  return async () => {
+    const html = await render();
+    if (html !== last.html) last = { html, etag: strongEtag(html) };
+    return last;
+  };
+}
+
+async function serveIndex(req: IncomingMessage, res: ServerResponse, renderIndex: IndexRenderer): Promise<void> {
+  let page: { html: string; etag: string };
+  try {
+    page = await renderIndex();
+  } catch {
+    return void res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
+  }
+  sendCacheable(req, res, MIME['.html'], 'no-cache', { etag: page.etag, content: page.html });
 }
 
 function serveText(req: IncomingMessage, res: ServerResponse, contentType: string, body: string): void {
@@ -157,7 +177,7 @@ function serveText(req: IncomingMessage, res: ServerResponse, contentType: strin
 }
 
 function serveStatic(
-  req: IncomingMessage, res: ServerResponse, pathname: string, publicDir: string, renderIndex: IndexRenderer,
+  req: IncomingMessage, res: ServerResponse, pathname: string, publicDir: string, renderIndex: IndexRenderer, readFile: FileReader,
 ): Promise<void> | void {
   // SPA fallback: room links are rendered client-side.
   const isRoomPage = /^\/r\/[^/]+\/?$/.test(pathname);
@@ -172,7 +192,7 @@ function serveStatic(
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Forbidden');
     return;
   }
-  serveFile(req, res, filePath);
+  return serveFile(req, res, filePath, readFile);
 }
 
 function handleError(err: unknown, res: ServerResponse, log: Logger): void {
@@ -238,7 +258,8 @@ function arrivedOverHttps(req: IncomingMessage, trustedProxyHops: number): boole
 function createHandler(deps: ApiDeps, config: AppConfig) {
   const limiter = createRateLimiter(API_RATE_WINDOW_MS, API_RATE_MAX);
   const roomMisses = createRateLimiter(API_RATE_WINDOW_MS, ROOM_MISS_MAX);
-  const renderIndex = createIndexRenderer(path.join(config.publicDir, 'index.html'), config);
+  const renderIndex = withEtag(createIndexRenderer(path.join(config.publicDir, 'index.html'), config));
+  const readFile = createFileCache();
   setInterval(() => { limiter.prune(); roomMisses.prune(); }, API_RATE_WINDOW_MS).unref();
   return async (req: IncomingMessage, res: ServerResponse) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
@@ -264,7 +285,7 @@ function createHandler(deps: ApiDeps, config: AppConfig) {
     }
     if (pathname === '/robots.txt') return serveText(req, res, 'text/plain; charset=utf-8', robotsTxt(config.publicOrigin));
     if (pathname === '/sitemap.xml') return serveText(req, res, 'application/xml; charset=utf-8', sitemapXml(config.publicOrigin));
-    return serveStatic(req, res, pathname, config.publicDir, renderIndex);
+    return serveStatic(req, res, pathname, config.publicDir, renderIndex, readFile);
   };
 }
 

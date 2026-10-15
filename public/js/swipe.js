@@ -230,11 +230,13 @@ export function prepareNextCard() {
  */
 export async function revealNextCard() {
   const el = card();
+  const gen = ++generation;
   void el.offsetWidth; // commit the hidden state so the fade has a "from" without waiting for frames
   el.style.transition = '';
   el.classList.add('fading');
   el.style.opacity = '';
   await afterTransition(el, 'opacity', FADE_MS);
+  if (gen !== generation) return; // reset (back from a hidden tab, leaving) or a newer animation owns the card
   el.classList.remove('fading');
   out = null;
   setUnderScale(null);

@@ -134,6 +134,7 @@ function renderGalleryAudio({ muted, volume, adjustable }) {
   const percent = Math.round(volume * 100);
   slider.hidden = items[index]?.kind !== 'movie' || !adjustable;
   slider.value = String(muted ? 0 : percent);
+  slider.style.setProperty('--fill', `${muted ? 0 : percent}%`);
   slider.setAttribute('aria-valuetext', muted ? 'Silenciado' : `Volumen ${percent}%`);
   applyAudio($('galleryVideo'));
 }

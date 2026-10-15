@@ -1,7 +1,7 @@
 // Trailer sound: one muted flag + one volume level shared by the card and the gallery.
 // Muted on every load (browsers block unmuted autoplay); the level the user picks is remembered.
 // The rules live in volume.js; this module applies them to the <video> elements.
-import { initialAudioState, steppedVolume, syncedFromElement, toggledMute, withVolume } from './volume.js';
+import { initialAudioState, outputGain, steppedVolume, syncedFromElement, toggledMute, withVolume } from './volume.js';
 
 // v2: earlier builds could store their old 0.7 default, which is exactly the "too loud" level.
 const STORAGE_KEY = 'quejugamos:volume:v2';
@@ -131,11 +131,12 @@ export function prepareVideo(video) {
 // The element's `muted` stays the mute switch everywhere (iOS needs it for autoplay); on the
 // Web Audio path the gain carries the level and is also 0 while muted, so both agree.
 // A routed element keeps its gain even if Web Audio later failed: best effort beats silence.
+// Both paths get the perceptual gain (volume.js), not the slider position.
 export function applyAudio(video) {
-  if (volumeSupported) video.volume = state.volume;
+  if (volumeSupported) video.volume = outputGain(state.volume);
   else {
     const gain = state.muted ? routes.get(video) : gainFor(video);
-    if (gain) gain.gain.value = state.muted ? 0 : state.volume;
+    if (gain) gain.gain.value = state.muted ? 0 : outputGain(state.volume);
   }
   video.muted = state.muted; // after the gain: unmuting never plays a frame at full level
 }
