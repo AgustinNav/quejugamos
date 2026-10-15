@@ -82,7 +82,7 @@ describe('full flow', () => {
     assert.deepEqual(v1.body.currentVoters, [room.playerId]);
     const v2 = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.body.playerToken);
     assert.equal(v2.body.index, 1);
-    assert.deepEqual(v2.body.lastResult, { gameId: first, likes: 2, nopes: 0, match: true });
+    assert.deepEqual(v2.body.lastResult, { gameId: first, likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
     assert.equal(v2.body.myVote, null, 'the card closed: no vote on the new open card');
     const { myVote: _ignored, ...v2Snapshot } = v2.body;
 
@@ -162,7 +162,7 @@ describe('full flow', () => {
     assert.equal(kicked.status, 200);
     assert.ok(!kicked.body.players.some((p: { id: string }) => p.id === ghost.playerId));
     assert.equal(kicked.body.index, 1);
-    assert.deepEqual(kicked.body.lastResult, { gameId: first, likes: 2, nopes: 0, match: true });
+    assert.deepEqual(kicked.body.lastResult, { gameId: first, likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
 
     const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === kicked.body.version);
     assert.deepEqual(JSON.parse(event.data), kicked.body);

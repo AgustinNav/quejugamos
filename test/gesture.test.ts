@@ -149,6 +149,10 @@ describe('closesCard', () => {
     assert.equal(closesCard({ players, currentVoters: ['me', 'host'] }, 'me'), false);
   });
 
+  test('players who voted "played" count: currentVoters says who voted, not what', () => {
+    assert.equal(closesCard({ players, currentVoters: ['host', 'ana'] }, 'me'), true);
+  });
+
   test('a solo voter always closes the card', () => {
     assert.equal(closesCard({ players: [{ id: 'me' }], currentVoters: [] }, 'me'), true);
   });
