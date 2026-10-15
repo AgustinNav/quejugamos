@@ -1,7 +1,7 @@
 // API handlers. Thin: parse input, call the domain, broadcast, log, respond.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { normalizeRef, parseViaGuest } from './acquisition.ts';
-import { buildDeck, parseExcludeGameIds, parseFilters } from './deck.ts';
+import { buildDeck, parseFilters } from './deck.ts';
 import type { CatalogGame } from './deck.ts';
 import { bearerToken, readJsonBody, sendError, sendJson } from './http.ts';
 import type { Logger } from './log.ts';
@@ -12,8 +12,6 @@ import type { StreamTicketStore } from './tickets.ts';
 
 // Headers-only answer for HEAD on the events path (see roomEvents).
 const SSE_HEAD_HEADERS = { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' };
-// start may carry up to 200 excludeGameIds, which don't fit in the default 1 KB body.
-const START_BODY_BYTES = 16 * 1024;
 import type { SteamClient } from './steam.ts';
 
 export type ApiDeps = {
@@ -40,10 +38,8 @@ function publish(deps: ApiDeps, before: Snapshot, after: Snapshot): void {
   if (after.version === before.version) return;
   deps.hub.broadcast(after.code, after);
   if (after.lastResult && after.index > before.index) {
-    const { gameId, likes, nopes, match, played } = after.lastResult;
-    const finished = after.phase === 'finished';
-    if (played) return deps.log('card_skipped', { roomCode: after.code, gameId, finished });
-    deps.log('card_closed', { roomCode: after.code, gameId, likes, nopes, match, finished });
+    const { gameId, likes, nopes, played, playedOut, match } = after.lastResult;
+    deps.log('card_closed', { roomCode: after.code, gameId, likes, nopes, played, playedOut, match, finished: after.phase === 'finished' });
   }
 }
 
@@ -71,17 +67,16 @@ export const joinRoom: Handler = async (deps, { req, res, code }) => {
 };
 
 export const startRoom: Handler = async (deps, { req, res, code }) => {
-  const body = await readJsonBody(req, START_BODY_BYTES);
+  const body = await readJsonBody(req);
   const token = bearerToken(req);
   deps.store.assertCanStart(code, token);
   const filters = parseFilters(field(body, 'filters'), deps.platforms);
-  const excluded = new Set(parseExcludeGameIds(field(body, 'filters'), new Set(deps.games.map((g) => g.id))));
   const prices = await deps.steam.getCatalogPrices(deps.priceTimeoutMs);
   const snapshot = deps.store.start(code, token, filters, (f, playerCount) =>
-    buildDeck(deps.games, f, playerCount, prices, deps.randomInt, excluded));
+    buildDeck(deps.games, f, playerCount, prices, deps.randomInt));
   deps.hub.broadcast(snapshot.code, snapshot);
   deps.log('game_started', {
-    roomCode: snapshot.code, players: snapshot.players.length, deckSize: snapshot.deck.length, filters, excludedGames: excluded.size,
+    roomCode: snapshot.code, players: snapshot.players.length, deckSize: snapshot.deck.length, filters,
   });
   sendJson(res, 200, snapshot);
 };
@@ -108,14 +103,6 @@ export const nextCard: Handler = async (deps, { req, res, code }) => {
   sendJson(res, 200, after);
 };
 
-export const skipCard: Handler = async (deps, { req, res, code }) => {
-  const body = await readJsonBody(req);
-  const before = deps.store.snapshot(code);
-  const after = deps.store.skip(code, bearerToken(req), field(body, 'gameId'));
-  publish(deps, before, after);
-  sendJson(res, 200, after);
-};
-
 export const undoCard: Handler = async (deps, { req, res, code }) => {
   await readJsonBody(req);
   const before = deps.store.snapshot(code);
@@ -132,7 +119,7 @@ export const finishRoom: Handler = async (deps, { req, res, code }) => {
   const before = deps.store.snapshot(code);
   const after = deps.store.finish(code, bearerToken(req));
   publish(deps, before, after);
-  // index = cards that closed (voted or skipped); the open one was discarded.
+  // index = cards that closed (voted); the open one was discarded.
   deps.log('game_finished_early', { roomCode: after.code, closedCards: after.index, deckSize: after.deck.length });
   sendJson(res, 200, after);
 };

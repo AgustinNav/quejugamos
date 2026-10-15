@@ -5,6 +5,8 @@ import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
 import { renderUnder } from '../stack.js';
 
+const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
+
 let renderedGameId = null;
 let matchTimer = null;
 
@@ -14,13 +16,14 @@ function gameOrStub(id) {
   return getGame(id) || { id, name: id, players: [1, 1], platforms: [], tags: [], pitch: '' };
 }
 
-export function renderVoting(room, myVote) {
-  const id = currentGameId(room.state);
+// `state` is what the screen shows: the server snapshot, or the optimistic view while a vote is in flight.
+export function renderVoting(room, state, myVote) {
+  const id = currentGameId(state);
   if (!id) return;
-  if (id !== renderedGameId) showGame(id, room.state);
-  renderMyVote(room, myVote);
-  if (room.isHost) renderVoters(room);
-  $('undoBtn').disabled = room.state.index === 0;
+  if (id !== renderedGameId) showGame(id, state);
+  renderMyVote(room, state, myVote);
+  if (room.isHost) renderVoters(room, state);
+  $('undoBtn').disabled = state.index === 0;
   showScreen('votingScreen');
 }
 
@@ -85,23 +88,24 @@ function votedCount(state) {
   return state.currentVoters.length;
 }
 
-function renderMyVote(room, myVote) {
+function renderMyVote(room, state, myVote) {
   $('voteLikeBtn').setAttribute('aria-pressed', String(myVote === 'like'));
   $('voteNopeBtn').setAttribute('aria-pressed', String(myVote === 'nope'));
+  $('votePlayedBtn').setAttribute('aria-pressed', String(myVote === 'played'));
   $('voteBar').classList.toggle('has-vote', Boolean(myVote));
   showVoteStamp(myVote);
-  const count = `${votedCount(room.state)}/${room.state.players.length}`;
+  const count = `${votedCount(state)}/${state.players.length}`;
   $('voteStatus').textContent = myVote
-    ? `Votaste ${myVote === 'like' ? '👍' : '👎'} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
-    : `${room.isHost ? 'Tu voto: ← nope · → like' : 'Deslizá la tarjeta o tocá 👎 / 👍'} (${count} votaron)`;
+    ? `Votaste ${VOTE_EMOJI[myVote]} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
+    : `${room.isHost ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
 }
 
 // Shows who voted but never what they voted: the result is revealed when the card closes.
-function renderVoters(room) {
-  const voters = new Set(room.state.currentVoters);
-  const items = room.state.players.map((p) => voterItem(p, voters.has(p.id), p.id === room.session.playerId));
+function renderVoters(room, state) {
+  const voters = new Set(state.currentVoters);
+  const items = state.players.map((p) => voterItem(p, voters.has(p.id), p.id === room.session.playerId));
   $('voterList').replaceChildren(...items);
-  $('votersCount').textContent = `${votedCount(room.state)}/${room.state.players.length}`;
+  $('votersCount').textContent = `${votedCount(state)}/${state.players.length}`;
 }
 
 function voterItem(player, voted, isMe) {
@@ -134,7 +138,8 @@ export function showMatch(gameName) {
 export function announceResult(result) {
   const game = gameOrStub(result.gameId);
   if (result.match) return showMatch(game.name);
-  announce(`${game.name}: ${result.likes} like, ${result.nopes} nope. Pasamos al siguiente.`);
+  const played = result.played ? `, ${result.played} ya lo jugaron` : '';
+  announce(`${game.name}: ${result.likes} like, ${result.nopes} nope${played}. Pasamos al siguiente.`);
 }
 
 export function gameName(id) {

@@ -2,6 +2,17 @@
 // the app keeps working, the session just won't survive a reload.
 
 const PREFIX = 'quejugamos:room:';
+// Old versions remembered "already played" games across rooms; that memory is gone for good.
+const LEGACY_PLAYED_KEY = 'quejugamos:played';
+
+/** Best-effort removal of the retired cross-room "played" list from this device. */
+export function dropLegacyPlayedList() {
+  try {
+    localStorage.removeItem(LEGACY_PLAYED_KEY);
+  } catch (err) {
+    console.warn('[store] could not clear legacy played list:', err);
+  }
+}
 
 export function loadSession(code) {
   try {

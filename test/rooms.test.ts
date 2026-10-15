@@ -295,7 +295,7 @@ describe('vote', () => {
     r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
     const snap = r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
     assert.equal(snap.index, 1);
-    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 3, nopes: 0, match: true });
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 3, nopes: 0, played: 0, playedOut: false, match: true });
   });
 
   test('results keep a past match frozen when a player joins later', () => {
@@ -303,7 +303,7 @@ describe('vote', () => {
     for (const p of [r.host, r.ana, r.bob]) r.store.vote(r.code, p.playerToken, 'a', 'like');
     r.store.join(r.code, 'Late');
     const snap = r.store.snapshot(r.code);
-    assert.deepEqual(snap.results, { a: { gameId: 'a', likes: 3, nopes: 0, match: true } });
+    assert.deepEqual(snap.results, { a: { gameId: 'a', likes: 3, nopes: 0, played: 0, playedOut: false, match: true } });
   });
 
   test('undo removes the reopened card from results', () => {
@@ -318,7 +318,7 @@ describe('vote', () => {
     r.store.vote(r.code, r.host.playerToken, 'a', 'like');
     r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
     const snap = r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
-    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 1, match: false });
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 1, played: 0, playedOut: false, match: false });
   });
 
   test('a late joiner is required for auto-advance', () => {
@@ -349,7 +349,7 @@ describe('next', () => {
     r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
     const snap = r.store.next(r.code, r.host.hostToken);
     assert.equal(snap.index, 1);
-    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 1, nopes: 0, match: false });
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 1, nopes: 0, played: 0, playedOut: false, match: false });
   });
 
   test('requires the host', () => {
@@ -414,7 +414,7 @@ describe('finish (end voting early)', () => {
     assert.equal(snap.version, before.version + 1);
     assert.equal(snap.lastResult, null);
     assert.deepEqual(Object.keys(snap.results), ['a', 'b']);
-    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 3, nopes: 0, match: true });
+    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 3, nopes: 0, played: 0, playedOut: false, match: true });
     assert.equal(snap.results.c, undefined);
     // Outside voting the open card's votes would show up in `votes`: they must be gone, not leaked.
     assert.equal(snap.votes.c, undefined);
@@ -456,11 +456,11 @@ describe('finish (end voting early)', () => {
     assert.equal(r.store.snapshot(r.code).version, version);
   });
 
-  test('votes and skips are rejected once finished; joins are refused', () => {
+  test('votes are rejected once finished; joins are refused', () => {
     const r = votingRoom();
     r.store.finish(r.code, r.host.hostToken);
     expectError(() => r.store.vote(r.code, r.ana.playerToken, 'a', 'like'), 409, 'not_voting');
-    expectError(() => r.store.skip(r.code, r.ana.playerToken, 'a'), 409, 'not_voting');
+    expectError(() => r.store.vote(r.code, r.ana.playerToken, 'a', 'played'), 409, 'not_voting');
     expectError(() => r.store.join(r.code, 'Late'), 409, 'room_finished');
   });
 
@@ -527,8 +527,8 @@ describe('kick', () => {
     r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
     const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
     assert.equal(snap.index, 1);
-    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, match: true });
-    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 2, nopes: 0, match: true });
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
+    assert.deepEqual(snap.results.a, { gameId: 'a', likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
   });
 
   test('a kicked voter does not count toward the closing result', () => {
@@ -537,7 +537,7 @@ describe('kick', () => {
     r.store.vote(r.code, r.bob.playerToken, 'a', 'nope');
     r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
     const snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, match: true });
+    assert.deepEqual(snap.lastResult, { gameId: 'a', likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
   });
 
   test('does not close the card while remaining players are missing votes', () => {
@@ -692,93 +692,118 @@ describe('limits and expiry', () => {
   });
 });
 
-describe('skip ("Ya lo jugamos")', () => {
-  const skipped = (gameId: string, skippedBy: string) => ({ gameId, likes: 0, nopes: 0, match: false, played: true, skippedBy });
+describe('played vote ("Ya lo jugué")', () => {
+  const tally = (gameId: string, likes: number, nopes: number, played: number, playedOut: boolean, match = false) =>
+    ({ gameId, likes, nopes, played, playedOut, match });
 
-  test('any player closes the current card for everyone, discarding its votes', () => {
+  test('is accepted, changeable and clearable like like/nope, and stays private while the card is open', () => {
     const r = votingRoom();
-    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    const snap = r.store.vote(r.code, r.ana.playerToken, 'a', 'played');
+    assert.deepEqual(snap.currentVoters, [r.ana.playerId]);
+    assert.equal(snap.votes.a, undefined);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'played');
     r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    const before = r.store.snapshot(r.code).version;
-    const snap = r.store.skip(r.code, r.bob.playerToken, 'a');
-    assert.equal(snap.index, 1);
-    assert.equal(snap.phase, 'voting');
-    assert.equal(snap.version, before + 1);
-    assert.deepEqual(snap.lastResult, skipped('a', r.bob.playerId));
-    assert.deepEqual(snap.results, { a: skipped('a', r.bob.playerId) });
-    assert.equal(snap.votes.a, undefined, 'votes on a skipped card are discarded');
-    assert.deepEqual(snap.currentVoters, []);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, 'like');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'played');
+    const cleared = r.store.vote(r.code, r.ana.playerToken, 'a', null);
+    assert.deepEqual(cleared.currentVoters, []);
+    assert.equal(r.store.currentVote(r.code, r.ana.playerToken).vote, null);
   });
 
-  test('a skipped card never counts as a match, even if everyone else had liked it', () => {
-    const r = votingRoom();
-    r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
-    const snap = r.store.skip(r.code, r.host.playerToken, 'a');
-    assert.equal(snap.results.a.match, false);
-    assert.equal(snap.results.a.likes, 0);
-  });
-
-  test('skipping the last card finishes the room', () => {
-    const r = votingRoom();
-    r.store.next(r.code, r.host.hostToken);
-    r.store.next(r.code, r.host.hostToken);
-    const snap = r.store.skip(r.code, r.ana.playerToken, 'c');
-    assert.equal(snap.phase, 'finished');
-    assert.equal(snap.index, 3);
-    assert.equal(snap.results.c.played, true);
-  });
-
-  test('rejects a game that is not the current card, and a room that is not voting', () => {
-    const r = votingRoom();
-    expectError(() => r.store.skip(r.code, r.ana.playerToken, 'b'), 409, 'not_current_game');
-    for (const id of ['a', 'b', 'c']) r.store.skip(r.code, r.ana.playerToken, id);
-    expectError(() => r.store.skip(r.code, r.ana.playerToken, 'c'), 409, 'not_voting');
-    const { store } = makeStore();
-    const host = store.create('Host', '1.1.1.1');
-    expectError(() => store.skip(host.code, host.playerToken, 'a'), 409, 'not_voting');
-  });
-
-  test('validates auth and input without changing the room', () => {
+  test('rejects any other value without changing the room', () => {
     const r = votingRoom();
     const version = r.store.snapshot(r.code).version;
-    expectError(() => r.store.skip(r.code, null, 'a'), 401, 'unauthorized');
-    expectError(() => r.store.skip(r.code, 'not-a-token', 'a'), 401, 'unauthorized');
-    for (const bad of [undefined, null, 1, '', 'x'.repeat(65), ['a'], { id: 'a' }]) {
-      expectError(() => r.store.skip(r.code, r.ana.playerToken, bad), 400, 'invalid_game');
+    for (const bad of ['skip', 'PLAYED', 1, true, undefined, {}]) {
+      expectError(() => r.store.vote(r.code, r.ana.playerToken, 'a', bad), 400, 'invalid_vote');
     }
     assert.equal(r.store.snapshot(r.code).version, version);
   });
 
-  test('undo after a skip reopens the card cleanly', () => {
+  test('counts toward auto-advance', () => {
     const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'played');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
+    const snap = r.store.vote(r.code, r.bob.playerToken, 'a', 'like');
+    assert.equal(snap.index, 1);
+    assert.deepEqual(snap.lastResult, tally('a', 1, 1, 1, false));
+  });
+
+  test('playedOut needs a strict majority of the votes cast: 2/3 yes, 1/2 no, 1/1 yes', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'played');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'played');
+    assert.deepEqual(r.store.vote(r.code, r.bob.playerToken, 'a', 'like').lastResult, tally('a', 1, 0, 2, true));
+
+    r.store.vote(r.code, r.host.playerToken, 'b', 'played');
+    r.store.vote(r.code, r.ana.playerToken, 'b', 'like');
+    assert.deepEqual(r.store.next(r.code, r.host.hostToken).lastResult, tally('b', 1, 0, 1, false), '1 of 2 is not a majority');
+
+    r.store.vote(r.code, r.bob.playerToken, 'c', 'played');
+    assert.deepEqual(r.store.next(r.code, r.host.hostToken).lastResult, tally('c', 0, 0, 1, true), '1 of 1 is');
+  });
+
+  test('a card closed with no votes is not played out', () => {
+    const r = votingRoom();
+    assert.deepEqual(r.store.next(r.code, r.host.hostToken).lastResult, tally('a', 0, 0, 0, false));
+  });
+
+  test('never matches, even if every other player liked it', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
     r.store.vote(r.code, r.ana.playerToken, 'a', 'like');
-    r.store.skip(r.code, r.bob.playerToken, 'a');
+    const snap = r.store.vote(r.code, r.bob.playerToken, 'a', 'played');
+    assert.equal(snap.results.a.match, false);
+    assert.equal(snap.results.a.playedOut, false);
+  });
+
+  test('closed votes keep the value in the snapshot; results stay frozen after joins and kicks', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'played');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'played');
+    r.store.vote(r.code, r.bob.playerToken, 'a', 'nope');
+    r.store.join(r.code, 'Late');
+    r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    const snap = r.store.snapshot(r.code);
+    assert.equal(snap.votes.a[r.ana.playerId], 'played');
+    assert.deepEqual(snap.results.a, tally('a', 0, 1, 2, true));
+  });
+
+  test('undo after a played-out close reopens the card cleanly', () => {
+    const r = votingRoom();
+    r.store.vote(r.code, r.host.playerToken, 'a', 'played');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'played');
+    r.store.next(r.code, r.host.hostToken);
     const snap = r.store.undo(r.code, r.host.hostToken);
     assert.equal(snap.index, 0);
-    assert.equal(snap.phase, 'voting');
     assert.deepEqual(snap.results, {});
     assert.equal(snap.lastResult, null);
     assert.deepEqual(snap.currentVoters, []);
-    const voted = r.store.vote(r.code, r.ana.playerToken, 'a', 'nope');
-    assert.deepEqual(voted.currentVoters, [r.ana.playerId]);
+    assert.equal(r.store.currentVote(r.code, r.host.playerToken).vote, null);
   });
 
-  test('undo after skipping the last card goes back to voting', () => {
+  test('kicking a player removes their played vote and can close the card', () => {
     const r = votingRoom();
-    for (const id of ['a', 'b', 'c']) r.store.skip(r.code, r.ana.playerToken, id);
-    const snap = r.store.undo(r.code, r.host.hostToken);
-    assert.equal(snap.phase, 'voting');
-    assert.equal(snap.index, 2);
-    assert.deepEqual(Object.keys(snap.results), ['a', 'b']);
+    r.store.vote(r.code, r.host.playerToken, 'a', 'like');
+    r.store.vote(r.code, r.ana.playerToken, 'a', 'played');
+    const snap = r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
+    assert.equal(snap.index, 1, 'everyone left had voted');
+    assert.deepEqual(snap.lastResult, tally('a', 1, 0, 1, false));
+    const other = votingRoom();
+    other.store.vote(other.code, other.bob.playerToken, 'a', 'played');
+    const kicked = other.store.kick(other.code, other.host.hostToken, other.bob.playerId);
+    assert.deepEqual(kicked.currentVoters, []);
+    assert.equal(kicked.votes.a, undefined);
   });
 
-  test('results stay frozen: later joins and kicks do not change a skipped card', () => {
+  test('finish discards the open card played votes', () => {
     const r = votingRoom();
-    r.store.skip(r.code, r.bob.playerToken, 'a');
-    r.store.join(r.code, 'Late');
-    r.store.kick(r.code, r.host.hostToken, r.bob.playerId);
-    assert.deepEqual(r.store.snapshot(r.code).results.a, skipped('a', r.bob.playerId));
+    r.store.vote(r.code, r.host.playerToken, 'a', 'played');
+    const snap = r.store.finish(r.code, r.host.hostToken);
+    assert.equal(snap.phase, 'finished');
+    assert.deepEqual(snap.results, {});
+    assert.equal(snap.votes.a, undefined);
+    const resumed = r.store.undo(r.code, r.host.hostToken);
+    assert.deepEqual(resumed.currentVoters, []);
   });
 });
 
