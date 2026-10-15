@@ -3,10 +3,10 @@ import { $, toast } from './dom.js';
 import { api } from './api.js';
 import { errorMessage } from './errors.js';
 import { activeRoom, applySnapshot, failRoom, refreshRoom, renderPhase, myVote, setMyVote } from './room.js';
-import { currentGameId, gameName } from './views/voting.js';
+import { currentGameId } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
 import { bindRankingSheet } from './ranking-sheet.js';
-import { bindPlayedHint, excludedGameIds } from './played.js';
+import { bindUnvoted } from './views/results.js';
 import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
 import { bindSwipe, isCardOut, returnCard } from './swipe.js';
 import { closesCard } from './gesture.js';
@@ -78,31 +78,9 @@ async function hostAction(call) {
 export const forceNext = () => hostAction(api.next);
 export const undo = () => hostAction(api.undo);
 
-// Ends voting for everyone; the open card is discarded. Undo right after brings it back.
-export function finishVoting() {
-  if (!activeRoom()?.isHost) return;
-  if (!window.confirm('¿Terminar la votación para todos? Se muestra el ranking con lo votado hasta ahora.')) return;
-  hostAction(api.finish);
-}
-
-// "Ya lo jugamos": any player skips the open card for the whole room (it never counts as a match).
-export async function skipCurrentGame() {
-  const room = activeRoom();
-  if (!canVote(room) || room.skipping) return;
-  const gameId = currentGameId(room.state);
-  const question = `¿Saltear «${gameName(gameId)}» para todos? No va a volver a aparecer en las próximas salas del host.`;
-  if (!window.confirm(question)) return;
-  room.skipping = true;
-  $('playedBtn').disabled = true;
-  try {
-    applyResponse(room, await api.skip(room.code, room.session.playerToken, gameId));
-  } catch (err) {
-    handleActionError(room, err);
-  } finally {
-    room.skipping = false;
-    $('playedBtn').disabled = false;
-  }
-}
+// Pauses voting for everyone: the ranking so far is shown and the open card is set aside.
+// Reversible ("Seguir votando" = undo), so there is no confirmation.
+export const finishVoting = () => hostAction(api.finish);
 
 // Host deletes the room for everyone: names and votes are gone from the server right away.
 export async function closeRoom() {
@@ -138,11 +116,8 @@ function onKickClick(e) {
 export async function startVoting(filters) {
   const room = activeRoom();
   if (!room?.isHost) return;
-  // Games this browser's rooms already skipped as played stay out of the deck.
-  const excludeGameIds = excludedGameIds();
-  const body = excludeGameIds.length ? { ...filters, excludeGameIds } : filters;
   try {
-    applyResponse(room, await api.start(room.code, room.session.hostToken, body));
+    applyResponse(room, await api.start(room.code, room.session.hostToken, filters));
   } catch (err) {
     if (err.code === 'unauthorized') return handleActionError(room, err);
     setStartError(err.code);
@@ -152,6 +127,8 @@ export async function startVoting(filters) {
 const KEYS = {
   ArrowLeft: () => castVote('nope'),
   ArrowRight: () => castVote('like'),
+  j: () => castVote('played'),
+  J: () => castVote('played'),
   m: toggleMute,
   M: toggleMute,
   '+': volumeUp,
@@ -176,14 +153,14 @@ function onKeydown(e) {
 export function bindActions() {
   $('voteLikeBtn').addEventListener('click', () => castVote('like'));
   $('voteNopeBtn').addEventListener('click', () => castVote('nope'));
+  $('votePlayedBtn').addEventListener('click', () => castVote('played'));
   $('nextBtn').addEventListener('click', forceNext);
   $('undoBtn').addEventListener('click', undo);
-  $('playedBtn').addEventListener('click', skipCurrentGame);
   $('finishBtn').addEventListener('click', finishVoting);
   $('resumeVotingBtn').addEventListener('click', undo);
   bindRankingSheet(() => activeRoom()?.state);
   document.querySelectorAll('[data-close-room]').forEach((btn) => btn.addEventListener('click', closeRoom));
-  bindPlayedHint();
+  bindUnvoted(() => activeRoom()?.state);
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);
   document.addEventListener('keydown', onKeydown);

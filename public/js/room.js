@@ -6,7 +6,6 @@ import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
 import { flyOut, playedOut, prepareNextCard, resetCard, revealNextCard } from './swipe.js';
-import { syncPlayed } from './played.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
@@ -270,7 +269,6 @@ export function applySnapshot(room, snapshot) {
   }
   const prev = room.state;
   room.state = snapshot;
-  syncPlayed(room);
   if (!room.busy) render(room, prev);
   return true;
 }
@@ -284,7 +282,7 @@ function render(room, prev) {
   renderPhase(room);
 }
 
-// The card leaves (thrown, or shrunk if skipped as played), the next game is painted into it while
+// The card leaves (thrown, or shrunk if most voters had played it), the next game is painted into it while
 // hidden over the identical card underneath, then it fades in. Snapshots arriving meanwhile are
 // kept (room.busy) and rendered at the end.
 async function animateClose(room) {
@@ -299,9 +297,9 @@ async function animateClose(room) {
 }
 
 function leaveCard(result) {
-  if (result.played) {
-    // Skipped as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
-    toast(`«${gameName(result.gameId)}» — ya lo jugaron, salteado`);
+  if (result.playedOut) {
+    // Ranked apart as already played: no LIKE/NOPE, the toast (role=alert) also reaches screen readers.
+    toast(`«${gameName(result.gameId)}» — la mayoría ya lo jugó`);
     return playedOut();
   }
   announceResult(result);

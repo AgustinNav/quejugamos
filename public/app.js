@@ -8,6 +8,7 @@ import { bindActions, startVoting } from './js/actions.js';
 import { enterRoom } from './js/room.js';
 import { normalizeCode } from './js/code.js';
 import { captureRef } from './js/attribution.js';
+import { dropLegacyPlayedList } from './js/store.js';
 
 let leaveCurrent = null;
 
@@ -30,6 +31,7 @@ function navigate(path) {
 
 function init() {
   captureRef();
+  dropLegacyPlayedList();
   bindLanding(navigate);
   bindJoin();
   bindLobby(startVoting);

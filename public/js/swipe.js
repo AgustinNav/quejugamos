@@ -144,7 +144,7 @@ export function flyOut(direction) {
   return out ?? throwCard(direction);
 }
 
-/** "Ya lo jugamos": the card shrinks and fades in place with its own stamp, never as LIKE/NOPE. */
+/** Most voters had played it: the card shrinks and fades in place with its own stamp, never as LIKE/NOPE. */
 export function playedOut() {
   if (out) return out;
   const el = card();

@@ -5,6 +5,8 @@ import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
 import { renderUnder } from '../stack.js';
 
+const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
+
 let renderedGameId = null;
 let matchTimer = null;
 
@@ -88,12 +90,13 @@ function votedCount(state) {
 function renderMyVote(room, myVote) {
   $('voteLikeBtn').setAttribute('aria-pressed', String(myVote === 'like'));
   $('voteNopeBtn').setAttribute('aria-pressed', String(myVote === 'nope'));
+  $('votePlayedBtn').setAttribute('aria-pressed', String(myVote === 'played'));
   $('voteBar').classList.toggle('has-vote', Boolean(myVote));
   showVoteStamp(myVote);
   const count = `${votedCount(room.state)}/${room.state.players.length}`;
   $('voteStatus').textContent = myVote
-    ? `Votaste ${myVote === 'like' ? '👍' : '👎'} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
-    : `${room.isHost ? 'Tu voto: ← nope · → like' : 'Deslizá la tarjeta o tocá 👎 / 👍'} (${count} votaron)`;
+    ? `Votaste ${VOTE_EMOJI[myVote]} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
+    : `${room.isHost ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
 }
 
 // Shows who voted but never what they voted: the result is revealed when the card closes.
@@ -134,7 +137,8 @@ export function showMatch(gameName) {
 export function announceResult(result) {
   const game = gameOrStub(result.gameId);
   if (result.match) return showMatch(game.name);
-  announce(`${game.name}: ${result.likes} like, ${result.nopes} nope. Pasamos al siguiente.`);
+  const played = result.played ? `, ${result.played} ya lo jugaron` : '';
+  announce(`${game.name}: ${result.likes} like, ${result.nopes} nope${played}. Pasamos al siguiente.`);
 }
 
 export function gameName(id) {
