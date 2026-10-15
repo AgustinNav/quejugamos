@@ -199,7 +199,28 @@
         <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
       </div>
       <p class="muted" id="resultsNote"></p>
+      <div class="rank-tools" id="rankTools" hidden>
+        <div class="rank-sort">
+          <label for="rankSort">Ordenar por</label>
+          <select id="rankSort"></select>
+        </div>
+        <div class="rank-filters" role="group" aria-label="Filtros del ranking">
+          <button class="toggle" type="button" id="rankFilter-match" aria-pressed="false">Solo matches 💘</button>
+          <button class="toggle" type="button" id="rankFilter-sale" aria-pressed="false">Solo en oferta 🔥</button>
+          <button class="toggle" type="button" id="rankFilter-free" aria-pressed="false">Gratis</button>
+        </div>
+        <p class="muted rank-count" id="rankCount" aria-live="polite"></p>
+      </div>
+      <div class="rank-filtered-empty" id="rankFilteredEmpty" hidden>
+        <p>Ningún juego cumple los filtros.</p>
+        <button class="btn ghost" type="button" id="rankClearBtn">Quitar filtros</button>
+      </div>
       <ol class="ranking" id="ranking"></ol>
+      <div class="rank-export" id="rankExport" hidden>
+        <button class="btn primary" type="button" id="rankSaveBtn">⬇️ Guardar ranking</button>
+        <button class="btn ghost" type="button" id="rankCopyBtn">📋 Copiar como texto</button>
+        <p class="sr-only" id="rankStatus" aria-live="polite"></p>
+      </div>
       <section class="played-group" id="playedGroup" aria-labelledby="playedGroupTitle" hidden>
         <h3 id="playedGroupTitle">✅ Ya jugados <span class="count">(la mayoría ya los jugó, no cuentan para el ranking)</span></h3>
         <ul class="played-list" id="playedList"></ul>

@@ -8,7 +8,7 @@ import {
 import { currentGameId } from './views/voting.js';
 import { setStartError } from './views/lobby.js';
 import { bindRankingSheet } from './ranking-sheet.js';
-import { bindUnvoted } from './views/results.js';
+import { bindResultsTools, bindUnvoted } from './views/results.js';
 import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
 import { bindSwipe, isCardOut, returnCard } from './swipe.js';
 import { closesCard } from './gesture.js';
@@ -179,6 +179,7 @@ export function bindActions() {
   bindRankingSheet(() => activeRoom()?.state);
   document.querySelectorAll('[data-close-room]').forEach((btn) => btn.addEventListener('click', closeRoom));
   bindUnvoted(() => activeRoom()?.state);
+  bindResultsTools(() => activeRoom()?.state);
   $('voterList').addEventListener('click', onKickClick);
   $('lobbyPlayers').addEventListener('click', onKickClick);
   document.addEventListener('keydown', onKeydown);

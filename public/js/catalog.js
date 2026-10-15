@@ -50,6 +50,9 @@ export function priceUsd(game) {
   return null;
 }
 
+/** Current discount percentage (0 when none or unknown). */
+export const discountPercent = (game) => Number(details.get(game.id)?.price?.discount_percent) || 0;
+
 // Returns markup built only from numbers/escaped text.
 export function priceInfo(game) {
   const d = details.get(game.id);
