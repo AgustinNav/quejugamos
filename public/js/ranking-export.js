@@ -13,13 +13,15 @@ const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0] || '';
 export function rankedByVotes(state, priceOf = () => null) {
   const rows = rankedResults(state).map((result, index) => ({ result, index }));
   rows.sort((a, b) => b.result.likes - a.result.likes || a.result.nopes - b.result.nopes
-    || (priceOf(a.result.gameId) ?? Infinity) - (priceOf(b.result.gameId) ?? Infinity) || a.index - b.index);
+    || (priceOf(a.result.gameId) ?? 99) - (priceOf(b.result.gameId) ?? 99) || a.index - b.index);
   return rows.map((r) => r.result);
 }
 
 /**
  * Everything the poster and the text need. `nameOf(gameId)` resolves a catalog name (falsy = unknown
  * game, skipped); `priceOf(gameId)` is only the ranking tie-break.
+ * @param {any} state
+ * @param {{ nameOf: (gameId: string) => string | undefined, priceOf?: (gameId: string) => number | null, now?: Date, max?: number }} options
  */
 export function buildExport(state, { nameOf, priceOf = () => null, now = new Date(), max = MAX_ITEMS } = {}) {
   const items = rankedByVotes(state, priceOf)
