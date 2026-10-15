@@ -174,8 +174,9 @@ a { color: inherit; }
 .card.voted-like .stamp.like, .card.voted-nope .stamp.nope { opacity: .9; }
 
 .card-body, .side { display: flex; flex-direction: column; gap: 14px; }
-.title-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-.title-row h2 { margin: 0; font-size: 32px; line-height: 1.1; }
+/* Wraps so a long name + discounted price never pushes the price past the card on phones. */
+.title-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; align-items: flex-start; }
+.title-row h2 { margin: 0; font-size: 32px; line-height: 1.1; flex: 1 1 12ch; min-width: 0; overflow-wrap: anywhere; }
 .price {
   white-space: nowrap; font-weight: 700; font-size: 20px; padding: 6px 12px; border-radius: 10px;
   background: var(--panel-2); border: 1px solid var(--border);
