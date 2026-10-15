@@ -85,7 +85,10 @@ export function flyOutTarget({ from, direction, viewportWidth, cardWidth, vx = 0
   };
 }
 
-/** True when this player's vote is the last one missing, so the server will close the card. */
+/**
+ * True when this player's vote is the last one missing, so the server will close the card.
+ * currentVoters says who voted, not what, so players who voted "played" count like any other.
+ */
 export function closesCard(state, myId) {
   const voters = new Set(state.currentVoters);
   if (voters.has(myId)) return false; // changing a vote never completes the round

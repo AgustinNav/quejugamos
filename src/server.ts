@@ -76,7 +76,6 @@ const ROUTES: Route[] = [
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/start$/, handler: routes.startRoom },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/vote$/, handler: routes.voteRoom },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/next$/, handler: routes.nextCard },
-  { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/skip$/, handler: routes.skipCard },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/undo$/, handler: routes.undoCard },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/finish$/, handler: routes.finishRoom },
   { method: 'POST', pattern: /^\/api\/rooms\/([^/]+)\/kick$/, handler: routes.kickPlayer },

@@ -3,7 +3,8 @@
 // The open card stays as is underneath: its trailer is paused while the sheet is open and resumed after.
 import { $ } from './dom.js';
 import { playQuietly } from './player.js';
-import { renderRanking } from './views/results.js';
+import { renderPlayedGroup, renderRanking } from './views/results.js';
+import { remainingCount } from './ranking-data.js';
 
 let open = false;
 let resumeOnClose = false;
@@ -12,9 +13,10 @@ let returnFocusTo = null;
 function paint(state) {
   const closed = state.index;
   $('rankingSheetNote').textContent = closed
-    ? `${closed} de ${state.deck.length} juegos cerrados. La tarjeta actual todavía no cuenta.`
+    ? `${closed} de ${state.deck.length} juegos cerrados. La tarjeta actual todavía no cuenta. Faltan ${remainingCount(state)}.`
     : '';
   renderRanking(state, $('partialRanking'), 'Todavía no se cerró ningún juego: votá el primero y volvé.');
+  renderPlayedGroup(state, $('partialPlayedGroup'), $('partialPlayedList'));
 }
 
 // A new card can start its trailer while the sheet is open (another player closed the card).

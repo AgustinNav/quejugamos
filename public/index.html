@@ -107,7 +107,6 @@
       </div>
       <button class="btn primary big" type="button" id="startBtn">Empezar 🔥</button>
       <p class="form-error" id="startError" role="alert"></p>
-      <p class="played-hint" id="playedHint" hidden><span id="playedHintText"></span> · <button class="link-btn" type="button" id="playedResetBtn">Mostrar de nuevo</button></p>
       <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
     </section>
   </main>
@@ -156,7 +155,6 @@
         <p class="pitch" id="gamePitch"></p>
         <p class="steam-desc" id="gameSteamDesc"></p>
         <div class="links" id="gameLinks"></div>
-        <button class="btn ghost played-btn" type="button" id="playedBtn">✅ Ya lo jugamos</button>
       </div>
     </article>
     </div>
@@ -166,7 +164,7 @@
       <!-- Room-level actions (not about the current card), outside the draggable card and away from the vote bar. -->
       <div class="finish-row">
         <button class="btn ghost" type="button" id="partialRankingBtn" aria-haspopup="dialog">📊 Ranking parcial</button>
-        <button class="btn ghost finish-btn" type="button" id="finishBtn" title="Terminar y ver ranking (F)">🏁 Terminar y ver ranking</button>
+        <button class="btn ghost finish-btn" type="button" id="finishBtn" title="Pausar y ver ranking (F)">⏸ Pausar y ver ranking</button>
       </div>
 
       <section class="voters host-only" aria-labelledby="votersTitle">
@@ -177,13 +175,14 @@
           <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
           <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
         </div>
-        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
+        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>J</kbd> ya lo jugué · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
       </section>
 
       <div class="vote-bar" id="voteBar">
         <p class="vote-status" id="voteStatus" aria-live="polite"></p>
         <div class="vote-buttons">
           <button class="vote-btn nope" type="button" id="voteNopeBtn" aria-pressed="false" aria-label="No me copa (nope)">👎</button>
+          <button class="vote-btn played" type="button" id="votePlayedBtn" aria-pressed="false" aria-label="Ya lo jugué" title="Ya lo jugué (J)">✅<span class="vote-label">Ya lo jugué</span></button>
           <button class="vote-btn like" type="button" id="voteLikeBtn" aria-pressed="false" aria-label="Me copa (like)">👍</button>
         </div>
       </div>
@@ -194,16 +193,21 @@
   <main class="screen" id="resultsScreen" hidden>
     <section class="panel results">
       <div class="results-head">
-        <h2>🏆 Ranking</h2>
-        <button class="btn ghost resume-voting-btn" type="button" id="resumeVotingBtn" hidden>↶ Seguir votando</button>
+        <h2 id="resultsTitle">🏆 Ranking</h2>
+        <button class="btn ghost resume-voting-btn" type="button" id="resumeVotingBtn" hidden>▶ Seguir votando</button>
         <a class="btn ghost" href="/" id="newRoomLink">Nueva sala</a>
         <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
       </div>
       <p class="muted" id="resultsNote"></p>
       <ol class="ranking" id="ranking"></ol>
       <section class="played-group" id="playedGroup" aria-labelledby="playedGroupTitle" hidden>
-        <h3 id="playedGroupTitle">✅ Ya jugados <span class="count">(salteados, no cuentan para el ranking)</span></h3>
+        <h3 id="playedGroupTitle">✅ Ya jugados <span class="count">(la mayoría ya los jugó, no cuentan para el ranking)</span></h3>
         <ul class="played-list" id="playedList"></ul>
+      </section>
+      <section class="unvoted-group" id="unvotedGroup" aria-labelledby="unvotedTitle" hidden>
+        <h3 id="unvotedTitle"></h3>
+        <ul class="unvoted-list" id="unvotedList"></ul>
+        <button class="btn ghost" type="button" id="unvotedMoreBtn" hidden></button>
       </section>
     </section>
   </main>
@@ -258,6 +262,10 @@
       </div>
       <p class="muted" id="rankingSheetNote"></p>
       <ol class="ranking" id="partialRanking"></ol>
+      <section class="played-group" id="partialPlayedGroup" aria-labelledby="partialPlayedTitle" hidden>
+        <h3 id="partialPlayedTitle">✅ Ya jugados</h3>
+        <ul class="played-list" id="partialPlayedList"></ul>
+      </section>
     </div>
   </dialog>
 </body>

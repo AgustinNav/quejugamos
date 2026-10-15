@@ -2,11 +2,12 @@
 import { timingSafeEqual } from 'node:crypto';
 
 export type Phase = 'lobby' | 'voting' | 'finished';
-export type Vote = 'like' | 'nope';
+// played: "I already played this game". Counts as a cast vote (advances the card) but never as a like.
+export type Vote = 'like' | 'nope' | 'played';
 export type Filters = { platforms: string[]; maxPrice: number | null; fitsGroup: boolean; playerCount: number | null };
 export type PublicPlayer = { id: string; name: string; isHost: boolean };
-// played/skippedBy: someone tapped "Ya lo jugamos" and the card was skipped (votes discarded, never a match).
-export type CardResult = { gameId: string; likes: number; nopes: number; match: boolean; played?: true; skippedBy?: string };
+// playedOut: strict majority of the votes cast on the card were "played" (ranked apart, never a match).
+export type CardResult = { gameId: string; likes: number; nopes: number; played: number; playedOut: boolean; match: boolean };
 
 export type Snapshot = {
   code: string;
@@ -84,7 +85,6 @@ const CODE_LENGTH = 6;
 const NAME_MAX = 16;
 const MAX_CODE_ATTEMPTS = 50;
 const PLAYER_ID_MAX = 64;
-const GAME_ID_MAX = 64;
 // Controls, format chars (zero-width, bidi, RLM), line/paragraph separators and the Hangul fillers
 // render as nothing or reorder text: a name made of them is invisible or impersonates another player.
 const FORBIDDEN_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}ㅤᅟᅠﾠ]/u;
@@ -200,8 +200,8 @@ export class RoomStore {
   vote(code: string, token: string | null, gameId: unknown, vote: unknown): Snapshot {
     const room = this.getRoom(code);
     const player = this.requirePlayer(room, token);
-    if (typeof gameId !== 'string' || !(vote === 'like' || vote === 'nope' || vote === null)) {
-      throw new RoomError(400, 'invalid_vote', 'Expected { gameId: string, vote: "like" | "nope" | null }');
+    if (typeof gameId !== 'string' || !(vote === 'like' || vote === 'nope' || vote === 'played' || vote === null)) {
+      throw new RoomError(400, 'invalid_vote', 'Expected { gameId: string, vote: "like" | "nope" | "played" | null }');
     }
     if (room.phase !== 'voting') throw new RoomError(409, 'not_voting', 'The room is not voting');
     if (room.deck[room.index] !== gameId) throw new RoomError(409, 'not_current_game', 'That game is not the current card');
@@ -216,23 +216,6 @@ export class RoomStore {
     this.requireHost(room, token);
     if (room.phase !== 'voting') throw new RoomError(409, 'not_voting', 'The room is not voting');
     closeCurrentCard(room);
-    this.touch(room);
-    return toSnapshot(room);
-  }
-
-  /**
-   * Any player marks the open card as already played: it closes for the whole room right away, its
-   * votes are discarded and it never counts as a match. undo reopens it like any other closed card.
-   */
-  skip(code: string, token: string | null, gameId: unknown): Snapshot {
-    const room = this.getRoom(code);
-    const player = this.requirePlayer(room, token);
-    if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > GAME_ID_MAX) {
-      throw new RoomError(400, 'invalid_game', 'Expected { gameId: string }');
-    }
-    if (room.phase !== 'voting') throw new RoomError(409, 'not_voting', 'The room is not voting');
-    if (room.deck[room.index] !== gameId) throw new RoomError(409, 'not_current_game', 'That game is not the current card');
-    closeCurrentCard(room, player.id);
     this.touch(room);
     return toSnapshot(room);
   }
@@ -483,16 +466,16 @@ function everyoneVoted(room: Room): boolean {
   return room.players.every((p) => cardVotes[p.id] !== undefined);
 }
 
-/** skippedBy: the player who marked the card as already played; its votes are discarded. */
-function closeCurrentCard(room: Room, skippedBy?: string): void {
+/** Freezes the open card's tally. playedOut needs a strict majority of the votes CAST (0 votes never qualifies). */
+function closeCurrentCard(room: Room): void {
   const gameId = room.deck[room.index];
-  if (skippedBy) delete room.votes[gameId];
   const cardVotes = Object.values(room.votes[gameId] ?? {});
   const likes = cardVotes.filter((v) => v === 'like').length;
   const nopes = cardVotes.filter((v) => v === 'nope').length;
-  const result: CardResult = skippedBy
-    ? { gameId, likes, nopes, match: false, played: true, skippedBy }
-    : { gameId, likes, nopes, match: likes === room.players.length };
+  const played = cardVotes.filter((v) => v === 'played').length;
+  const result: CardResult = {
+    gameId, likes, nopes, played, playedOut: played * 2 > likes + nopes + played, match: likes === room.players.length,
+  };
   room.history.push(result);
   room.lastResult = result;
   room.index += 1;

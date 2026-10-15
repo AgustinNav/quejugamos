@@ -9,7 +9,7 @@
 {"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T21:06:00.000Z","roomCode":"AAAAAA","gameId":"lethal-company","likes":3,"nopes":0,"match":true,"finished":false}
 {"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T21:07:00.000Z","roomCode":"AAAAAA","gameId":"phasmophobia","likes":3,"nopes":0,"match":true,"finished":true}
 {"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-12T22:00:00.000Z","roomCode":"BBBBBB","liveRooms":2,"ref":"direct","viaGuest":true}
-{"severity":"INFO","message":"card_skipped","event":"card_skipped","time":"2026-10-12T22:03:00.000Z","roomCode":"BBBBBB","gameId":"valheim","finished":false}
+{"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T22:03:00.000Z","roomCode":"BBBBBB","gameId":"valheim","likes":0,"nopes":1,"played":2,"playedOut":true,"match":false,"finished":false}
 {"severity":"INFO","message":"card_closed","event":"card_closed","time":"2026-10-12T22:04:00.000Z","roomCode":"BBBBBB","gameId":"terraria","likes":1,"nopes":1,"match":false,"finished":false}
 not json at all {broken
 {"severity":"INFO","message":"room_created","event":"room_created","time":"2026-10-12T23:59:59.999Z","roomCode":"CCCCCC","liveRooms":3}

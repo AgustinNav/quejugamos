@@ -4,7 +4,6 @@ import { PLATFORMS } from '../catalog.js';
 import { qrDataUrl } from '../qr.js';
 import { roomUrl } from '../code.js';
 import { errorMessage } from '../errors.js';
-import { renderPlayedHint } from '../played.js';
 
 const NO_PRICE_LIMIT = 70;
 const MAX_PLAYERS = 12;
@@ -29,7 +28,6 @@ export function renderHostLobby(room) {
   renderNameList('lobbyPlayers', players, room.session.playerId, { kickable: true });
   $('lobbyCount').textContent = `(${players.length}/${MAX_PLAYERS})`;
   renderFilters();
-  renderPlayedHint();
   showScreen('lobbyHostScreen');
 }
 

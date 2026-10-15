@@ -176,27 +176,16 @@ function validPlayerCountFields(filters) {
   return countOk && (filters.fitsGroup === undefined || typeof filters.fitsGroup === 'boolean');
 }
 
-// Same rules as the real server: excludeGameIds is optional, max 200, known catalog ids only.
-const KNOWN_IDS = new Set(GAMES.map((g) => g.id));
-function excludedIds(filters) {
-  const ids = filters?.excludeGameIds;
-  if (ids === undefined) return new Set();
-  if (!Array.isArray(ids) || ids.length > 200 || !ids.every((id) => KNOWN_IDS.has(id))) {
-    throw new HttpError(400, 'invalid_filters', 'excludeGameIds inválido');
-  }
-  return new Set(ids);
-}
-
-// skippedBy: "Ya lo jugamos" — votes discarded, never a match.
-function closeCard(room, skippedBy = null) {
+// Same rule as the real server: the tally is frozen at close; playedOut = strict majority of votes cast.
+function closeCard(room) {
   const gameId = room.deck[room.index];
-  if (skippedBy) delete room.votes[gameId];
-  const votes = room.votes[gameId] || {};
-  const likes = Object.values(votes).filter((v) => v === 'like').length;
-  const nopes = Object.values(votes).filter((v) => v === 'nope').length;
-  room.lastResult = skippedBy
-    ? { gameId, likes, nopes, match: false, played: true, skippedBy }
-    : { gameId, likes, nopes, match: likes === room.players.length };
+  const votes = Object.values(room.votes[gameId] || {});
+  const likes = votes.filter((v) => v === 'like').length;
+  const nopes = votes.filter((v) => v === 'nope').length;
+  const played = votes.filter((v) => v === 'played').length;
+  room.lastResult = {
+    gameId, likes, nopes, played, playedOut: played * 2 > likes + nopes + played, match: likes === room.players.length,
+  };
   room.history.push(room.lastResult);
   room.index += 1;
   if (room.index >= room.deck.length) room.phase = 'finished';
@@ -274,12 +263,11 @@ async function join(req, res, room) {
 }
 
 async function start(req, res, room) {
-  const body = await readJson(req, 16 * 1024);
+  const body = await readJson(req);
   auth(req, room, { host: true });
   if (room.phase !== 'lobby') throw new HttpError(409, 'already_started', 'Ya empezó');
   const filters = validFilters(body.filters);
-  const excluded = excludedIds(body.filters);
-  const deck = buildDeck(filters, room.players.length).filter((id) => !excluded.has(id));
+  const deck = buildDeck(filters, room.players.length);
   if (!deck.length) throw new HttpError(422, 'empty_deck', 'Ningún juego pasa los filtros');
   Object.assign(room, { phase: 'voting', filters, deck, index: 0, votes: {}, lastResult: null, history: [] });
   changed(room);
@@ -290,7 +278,7 @@ async function vote(req, res, room) {
   const body = await readJson(req);
   const player = auth(req, room);
   if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
-  if (![ 'like', 'nope', null ].includes(body.vote) || typeof body.gameId !== 'string') throw new HttpError(400, 'invalid_vote', 'Voto inválido');
+  if (!['like', 'nope', 'played', null].includes(body.vote) || typeof body.gameId !== 'string') throw new HttpError(400, 'invalid_vote', 'Voto inválido');
   if (body.gameId !== room.deck[room.index]) throw new HttpError(409, 'not_current_game', 'No es la tarjeta actual');
   const votes = (room.votes[body.gameId] ||= {});
   if (body.vote === null) delete votes[player.id];
@@ -325,17 +313,6 @@ async function next(req, res, room) {
   auth(req, room, { host: true });
   if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
   closeCard(room);
-  changed(room);
-  sendJson(res, 200, snapshot(room));
-}
-
-async function skip(req, res, room) {
-  const body = await readJson(req);
-  const player = auth(req, room);
-  if (typeof body?.gameId !== 'string' || !body.gameId || body.gameId.length > 64) throw new HttpError(400, 'invalid_game', 'Juego inválido');
-  if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
-  if (body.gameId !== room.deck[room.index]) throw new HttpError(409, 'not_current_game', 'No es la tarjeta actual');
-  closeCard(room, player.id);
   changed(room);
   sendJson(res, 200, snapshot(room));
 }
@@ -503,7 +480,6 @@ const ROOM_ROUTES = {
   'POST /next': next,
   'POST /undo': undo,
   'POST /finish': finish,
-  'POST /skip': skip,
   'POST /kick': kick,
   'GET /me': me,
   'POST /close': closeRoom,
