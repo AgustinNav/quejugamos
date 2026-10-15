@@ -1,0 +1,3 @@
+# Rooms that must not count in the marketing metrics (owner's tests and recordings).
+# One room code per line; `#` starts a comment. Read by scripts/metrics-from-logs.mjs.
+BRVVJ2  # 2026-10-14 recording session with friends
