@@ -3,12 +3,13 @@
 // got to vote are listed too.
 import { $, esc, showScreen } from '../dom.js';
 import { getGame, getDetails, loadMany, priceInfo, priceUsd, storeUrl } from '../catalog.js';
-import { finishedEarly, playedOutResults, rankedResults, unvotedGameIds } from '../ranking-data.js';
+import { finishedEarly, idsToFetch, playedOutResults, rankedResults, unvotedGameIds } from '../ranking-data.js';
 
 const THUMBS_TO_FETCH = 10;
 const UNVOTED_VISIBLE = 12;
 let renderToken = 0;
 let unvotedToken = 0;
+const unvotedTried = new Set(); // ids already fetched once for the "Sin votar" list
 let unvotedExpanded = false;
 
 const playedLabel = (n) => `${n} lo jugaron`;
@@ -70,7 +71,7 @@ function renderUnvoted(state) {
   $('unvotedMoreBtn').hidden = hidden === 0;
   $('unvotedMoreBtn').textContent = `+${hidden} más`;
   const token = ++unvotedToken;
-  const missing = shown.map((g) => g.id).filter((id) => !getDetails(id));
+  const missing = idsToFetch(shown.map((g) => g.id), (id) => Boolean(getDetails(id)), unvotedTried);
   if (missing.length) loadMany(missing).then(() => { if (token === unvotedToken) renderUnvoted(state); });
 }
 
