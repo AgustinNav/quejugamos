@@ -19,3 +19,14 @@ export const unvotedGameIds = (state) => (finishedEarly(state) ? state.deck.slic
 
 /** Cards still to close while voting (the open one included). */
 export const remainingCount = (state) => Math.max(0, state.deck.length - state.index);
+
+/**
+ * Ids worth fetching details for: not loaded and never tried. Re-rendering after a fetch must not ask
+ * for the same ids again: a game with no Steam data resolves in the same microtask and stays without
+ * details, so a render that refetches it loops forever and freezes the page. Marks the ids as tried.
+ */
+export function idsToFetch(ids, hasDetails, tried) {
+  const fresh = ids.filter((id) => !hasDetails(id) && !tried.has(id));
+  fresh.forEach((id) => tried.add(id));
+  return fresh;
+}
