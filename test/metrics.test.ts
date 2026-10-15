@@ -21,7 +21,7 @@ describe('scripts/metrics-from-logs.mjs', () => {
         roomsByRef: { direct: 1, tt: 1, unknown: 1 },
         roomsViaGuest: 1,
         playersJoined: 2,
-        // valheim was matched, reopened and re-closed without a match; skips never count.
+        // valheim was matched, reopened and re-closed without a match; played-out closes never count.
         cardsMatched: 2,
         roomsWithMatch: 1,
       },
