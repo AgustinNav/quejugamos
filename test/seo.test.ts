@@ -104,8 +104,8 @@ describe('SEO over HTTP (defaults: no verification env)', () => {
     assert.ok(!res.text.includes('__SITE_VERIFICATION__'));
     assert.ok(res.text.includes('<link rel="canonical" href="https://seo.example/">'));
     assert.ok(res.text.includes('<meta property="og:url" content="https://seo.example/">'));
-    assert.ok(res.text.includes('<meta property="og:image" content="https://seo.example/og-image.png">'));
-    assert.ok(res.text.includes('<meta name="twitter:image" content="https://seo.example/og-image.png">'));
+    assert.ok(res.text.includes('<meta property="og:image" content="https://seo.example/og-image.jpg">'));
+    assert.ok(res.text.includes('<meta name="twitter:image" content="https://seo.example/og-image.jpg">'));
     assert.ok(!res.text.includes('google-site-verification'));
     assert.ok(!res.text.includes('msvalidate.01'));
     assert.equal(res.headers.get('x-robots-tag'), null);

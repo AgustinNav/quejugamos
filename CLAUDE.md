@@ -56,7 +56,7 @@ Cada una existe por una razón concreta. Si una tarea choca con alguna, pará y 
 | Type-check | `npm run typecheck` |
 | Mock del backend para frontend | `node tools/mock-server.mjs` → puerto 3100. Endpoints `/__mock/...` para bots, expirar sala y cortar SSE (ver header del archivo) |
 | Smoke de Docker (igual que CI) | `./scripts/docker-smoke.sh [tag]` |
-| Regenerar OG image | `msedge --headless --disable-gpu --hide-scrollbars --window-size=1200,630 --screenshot=public/og-image.png tools/og-image.html` |
+| Regenerar OG image | `msedge --headless --disable-gpu --hide-scrollbars --window-size=1200,630 --screenshot=public/og-image.jpg tools/og-image.html` |
 
 Env vars: tabla en `README.md`.
 
