@@ -477,7 +477,7 @@ describe('static files', () => {
     const csp = index.headers.get('content-security-policy') ?? '';
     assert.match(csp, /script-src 'self'(;|$)/);
     assert.ok(!csp.includes('jsdelivr'), csp);
-    assert.match(await index.text(), /<script src="\/vendor\/hls\.min\.js"/);
+    assert.doesNotMatch(await index.text(), /vendor\/hls\.min\.js/, 'hls.js is injected lazily, not in <head>');
     const hls = await fetch(`${base}/vendor/hls.min.js`);
     assert.equal(hls.status, 200);
     assert.match(hls.headers.get('content-type') ?? '', /^text\/javascript/);
