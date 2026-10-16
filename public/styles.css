@@ -609,6 +609,8 @@ html { overscroll-behavior-x: none; }
 .rank-filtered-empty { margin-top: 16px; padding: 18px; text-align: center; border-radius: 14px; border: 1px dashed var(--border); }
 .rank-filtered-empty p { margin: 0 0 10px; color: var(--muted); }
 .rank-filtered-empty .btn, .rank-export .btn { min-height: 48px; }
+.rank-names { display: flex; align-items: center; gap: 12px; flex: 1 1 100%; min-height: 48px; cursor: pointer; }
+.rank-names input { width: 24px; height: 24px; flex: none; accent-color: var(--accent); }
 .rank-export { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 @media (max-width: 960px) {
   .rank-sort { width: 100%; }
