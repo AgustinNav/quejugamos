@@ -1,17 +1,17 @@
 # ¿Qué Jugamos? con un streamer: escala y SEO
 
-**Fecha:** 2026-10-17 · **Autor:** Claude (análisis) para Agus · **Versión:** 1.0
+**Fecha:** 2026-10-17 · **Autor:** Claude (análisis) para Agus · **Versión:** 1.1 (G1 hecho: PR #10)
 **Audiencia:** Agus · **Objetivo:** decidir qué hay que cambiar antes de que un streamer mande miles de personas a la app, y cómo posicionarla en buscadores sin gastar plata.
 
 ## TL;DR
 
 - **Lo primero que se rompe no es la CPU ni el rate limit: es el bandwidth.** Render free (workspace Hobby) incluye **5 GB/mes de salida**. Si se pasa y no hay tarjeta cargada, Render **apaga el servicio hasta el mes siguiente**. La garantía de USD 0 se cumple, pero la app queda muerta varias semanas.
-- **El culpable es el SSE, no los visitantes.** Cada voto reenvía el snapshot completo a toda la sala, y el snapshot crece con cada carta cerrada. El tráfico de una sala crece con *jugadores² × cartas²*. Medido con el `RoomStore` real: una sala de 12 jugadores que vota los 107 juegos manda **~351 MB** sin comprimir. Con ese patrón, **14 salas así agotan el mes**. Un visitante que solo mira la landing pesa ~80 KB comprimido; 5 GB alcanzan para ~60.000 visitas así.
+- **El culpable era el SSE, no los visitantes.** Cada voto reenviaba el snapshot completo a toda la sala, y el snapshot crece con cada carta cerrada: el tráfico crecía con *jugadores² × cartas²*. Medido con el `RoomStore` real: una sala de 12 jugadores que vota los 107 juegos mandaba **~351 MB** sin comprimir (14 salas así agotaban el mes). **Con G1 (PR #10, evento `voters`) baja a ~31,6 MB: ~160 salas así por mes.** Lo que queda crece con cartas² (los `votes` de cartas cerradas en cada `state`) y está en curso en otra sesión. Un visitante que solo mira la landing pesa ~80 KB comprimido; 5 GB alcanzan para ~60.000 visitas así.
 - **Steam no es el cuello de botella.** Gracias a la allowlist, la cache de 6 h y el dedupe, las llamadas a Steam crecen con el tamaño del catálogo (107 juegos) y no con la cantidad de usuarios. El riesgo real es el cold start: el disco de Render es efímero y la cache arranca vacía.
 - **Problema de producto:** si el streamer muestra el QR en pantalla, los primeros 11 viewers ocupan la sala (máximo 12 jugadores) y sus amigos se quedan afuera. El host puede echar gente, pero no puede cerrar la inscripción.
 - **CGNAT:** en Argentina, los celulares suelen compartir IP. Los límites por IP (5 salas por hora, 20 streams SSE, 20 códigos errados por minuto) se comparten entre desconocidos justo durante el pico.
 - **SEO:** la base técnica está bien hecha (canonical, OG, JSON-LD, robots, sitemap, `noindex` en `/r/` y `/api/`). Lo que falta es **contenido indexable**: la landing tiene un `h1` y una línea, está marcada `hidden` hasta que corre el JS, y el sitemap tiene una sola URL. El activo SEO que ya existe son los **107 juegos curados con descripción propia en español** de `public/games.js`. Hay que convertirlos en páginas `/juegos/...` renderizadas por el server, sin build step.
-- **Recomendación:** no empujar la app a streamers hasta tener **(1) eventos SSE incrementales** y **(2) el bandwidth medido en el dashboard de Render**. En paralelo y sin costo: landing visible del lado del server y páginas de juegos.
+- **Recomendación:** no empujar la app a streamers hasta tener **(1) el bandwidth medido en el dashboard de Render** después del deploy del PR #10 y **(2) `votes` fuera del stream** (la otra mitad de G1). Los eventos SSE incrementales ya están en `main`. En paralelo y sin costo: landing visible del lado del server y páginas de juegos.
 
 > "Indexado" en el sentido de base de datos no aplica: **no hay DB**. Las salas viven en un `Map` en memoria (`src/rooms.ts`) y cada lookup es O(1) por código. En este documento, "indexado" significa siempre **indexación en buscadores**.
 
@@ -35,7 +35,7 @@ Con 2.000 visitantes en 5 minutos son ~74.000 requests, o sea **~250 req/s de pi
 
 | # | Componente | Límite actual | Qué pasa con un streamer | Severidad |
 |---|---|---|---|---|
-| 1 | **Bandwidth Render free** | 5 GB/mes por workspace | Una sala de 12 jugadores × 107 cartas = ~351 MB de SSE. Un par de noches con streamer → servicio apagado hasta el 1° del mes siguiente | **Crítica** |
+| 1 | **Bandwidth Render free** | 5 GB/mes por workspace | Una sala de 12 jugadores × 107 cartas mandaba ~351 MB de SSE; con el PR #10, ~31,6 MB. Una noche con muchas salas grandes todavía puede apagar el servicio hasta el 1° del mes siguiente | **Alta** (era Crítica) |
 | 2 | **Sala del streamer** | `maxPlayers: 12` | Entran los primeros 11 viewers; el resto ve `room_full`. Trolls con nombres ofensivos (el filtro de nombres solo saca invisibles) | Alta (producto) |
 | 3 | **Límites por IP con CGNAT** | 5 salas/IP/h · 600 req/min · 20 SSE/IP · 20 misses/min | Cientos de usuarios de una misma operadora móvil comparten una IPv4: el 6° que crea sala en esa hora recibe 429, y los códigos mal tipeados bloquean las búsquedas de todos durante 1 min | Alta |
 | 4 | **CPU 0,1 vCPU** | Render free | ~250 req/s de pico en estáticos. Sin medir; estimo que 0,1 vCPU aguanta cientos de req/s simples, no miles → latencia alta y timeouts en el pico | Media-alta (sin medir) |
@@ -62,19 +62,19 @@ Con 2.000 visitantes en 5 minutos son ~74.000 requests, o sea **~250 req/s de pi
 | Trailers, imágenes y capturas | **0**: los sirve el CDN de Steam directo al navegador | CSP `media-src` |
 | **SSE por sala** | ver tabla siguiente | medido |
 
-**SSE, medido con el `RoomStore` real** (votos al azar, snapshot completo por voto como hace `routes.ts`, **sin comprimir**):
+**SSE, medido con el `RoomStore` real** (votos al azar, **sin comprimir**). "Antes" = snapshot completo por voto. "Después" = PR #10: `event: voters` (~100 B) por cada voto que deja la carta abierta y `state` completo solo al cerrarla:
 
-| Jugadores × cartas votadas | Snapshot final | Bytes SSE de la sala | Salas así por mes (5 GB) |
-|---|---|---|---|
-| 4 × 20 | 6 KB | 1,3 MB | ~3.800 |
-| 4 × 40 | 10 KB | 3,9 MB | ~1.300 |
-| 8 × 40 | 14 KB | 20 MB | ~250 |
-| 12 × 40 | 18 KB | 57 MB | ~90 |
-| **12 × 107 (sala de streamer, catálogo completo)** | **43 KB** | **351 MB** | **~14** |
+| Jugadores × cartas votadas | Snapshot final | SSE antes | SSE después | Salas por mes (5 GB), antes → después |
+|---|---|---|---|---|
+| 4 × 20 | 6 KB | 1,3 MB | 0,4 MB | ~3.800 → ~12.500 |
+| 4 × 40 | 10 KB | 3,9 MB | 1,0 MB | ~1.300 → ~5.000 |
+| 8 × 40 | 14 KB | 20 MB | 2,9 MB | ~250 → ~1.700 |
+| 12 × 40 | 18 KB | 57 MB | 5,6 MB | ~90 → ~890 |
+| **12 × 107 (sala de streamer, catálogo completo)** | **43 KB** | **351 MB** | **31,6 MB** | **~14 → ~160** |
 
-¿Por qué crece tan rápido? `vote` hace `hub.broadcast(snapshot)` a los N clientes en **cada** voto. El snapshot lleva `votes` (cada voto de cada jugador en cada carta cerrada), `results` y el `deck` entero. Bytes ≈ N votos por carta × N clientes × tamaño del snapshot, y el tamaño crece con las cartas cerradas.
+¿Por qué crecía tan rápido? Antes del PR #10, `vote` hacía `hub.broadcast(snapshot)` a los N clientes en **cada** voto. El snapshot lleva `votes` (cada voto de cada jugador en cada carta cerrada), `results` y el `deck` entero. Bytes ≈ N votos por carta × N clientes × tamaño del snapshot, y el tamaño crece con las cartas cerradas. Ahora el snapshot completo viaja una vez por carta: el factor jugadores² desapareció, pero queda el de cartas² porque cada `state` sigue llevando `votes` de todas las cartas cerradas (~26 KB de los 43 KB al final). Sacarlo del stream es la segunda mitad de G1.
 
-**Lo que no verifiqué:** si Cloudflare comprime el stream `text/event-stream` evento por evento y si Render mide el bandwidth antes o después de comprimir. Un snapshot de 43 KB pesa 3,7 KB en gzip: si el stream sale comprimido, la sala de streamer baja de ~351 MB a **~30 MB**. Sigue siendo cuadrático y sigue siendo el consumo dominante. **Hay que medirlo** (paso Q1 del plan).
+**Lo que no verifiqué:** si Cloudflare comprime el stream `text/event-stream` evento por evento y si Render mide el bandwidth antes o después de comprimir. Un snapshot de 43 KB pesa 3,7 KB en gzip: si el stream sale comprimido, la sala de streamer (ya con el PR #10) baja de ~31,6 MB a unos **3 MB**. Sigue siendo el consumo dominante por sala. **Hay que medirlo** (paso Q1 del plan).
 
 ### 2.2 La sala del streamer
 
@@ -108,8 +108,9 @@ Todo cambio de límite va con su test de borde (Mistakes Log, 2026-10-09).
 
 | Prioridad | Mitigación | Impacto | Esfuerzo | Costo |
 |---|---|---|---|---|
-| **P0** | **Medir**: bandwidth en Render (Dashboard → workspace → Usage) antes y después de una sala de prueba de 4 × 20; verificar si el SSE sale comprimido (`curl -N --compressed -v` contra `/events`) | Saber si el techo es 14 o ~170 salas de streamer por mes | 30 min | USD 0 |
-| **P0** | **SSE incremental**: por voto, mandar un evento chico (`event: voters`, con `currentVoters` + `version`, ~100 B) y el snapshot completo solo al cerrar una carta, en `join`/`kick` y en los cambios de fase. Sacar `votes` de cartas cerradas del stream y servirlo bajo demanda en `finish`/export | 10–30× menos bytes SSE; deja de ser cuadrático en cartas | 1–2 días (cambio de contrato: backend + frontend + mock + `API.md` en un PR) | USD 0 |
+| **P0** | **Medir**: bandwidth en Render (Dashboard → workspace → Usage) antes y después de una sala de prueba de 4 × 20; verificar si el SSE sale comprimido (`curl -N --compressed -v` contra `/events`) | Saber si el techo es ~160 o ~1.500 salas de streamer por mes | 30 min | USD 0 |
+| ✅ **P0** | **SSE incremental, parte 1 (hecho, PR #10)**: `event: voters` (`currentVoters` + `version`, ~100 B) por cada voto que deja la carta abierta; `state` completo para todo lo demás | ~11× menos bytes SSE (351 → 31,6 MB en 12 × 107) | hecho | USD 0 |
+| **P0** | **SSE incremental, parte 2 (en curso, otra sesión)**: sacar `votes` de cartas cerradas de los eventos `state` y servirlo bajo demanda para el ranking y el export | Deja de ser cuadrático en cartas | ~1 día (cambio de contrato) | USD 0 |
 | **P1** | Toggle "cerrar inscripción" para el host | Salas de streamer usables | ½–1 día (contrato) | USD 0 |
 | **P1** | Guía para streamers (no mostrar el QR, pre-calentar la app, cerrar y recrear la sala) | Evita los dos fallos más visibles | 1 h (doc + copy) | USD 0 |
 | **P1** | Subir `roomsPerIpPerWindow` y `maxPerIp` SSE (§2.3) con tests de borde | Menos 429 bajo CGNAT | 2 h | USD 0 |
@@ -228,14 +229,14 @@ Reglas para que no lo traten como contenido programático de baja calidad:
 
 | # | Qué | Por qué | Costo |
 |---|---|---|---|
-| G1 | **SSE incremental** (cambio de contrato) | Bloquea cualquier campaña con streamers: sin esto, el cupo mensual se va en pocas noches | USD 0 |
+| G1 | **SSE incremental** (cambio de contrato). Parte 1 ✅ PR #10; parte 2 (`votes` fuera del stream) en curso | Bloqueaba cualquier campaña con streamers: con el snapshot completo por voto, el cupo mensual se iba en pocas noches | USD 0 |
 | G2 | Páginas `/juegos/...` + sitemap + JSON-LD | El grueso del SEO | USD 0 |
 | G3 | "Cerrar inscripción" para el host | Salas de streamer usables | USD 0 |
 | G4 | Load test con 0,1 vCPU | Reemplazar estimaciones por números | USD 0 |
 | G5 | Dominio + Cloudflare con cache | Autoridad propia + estáticos fuera del cupo | **Cuesta plata** |
 | G6 | Workers + Durable Objects | Saca el techo de instancia única | USD 0 con topes; semanas de trabajo |
 
-**Orden recomendado:** Q1 → G1 → Q3/Q7 → Q4/Q5 → G2 → G3. El resto según los números de Q1 y G4.
+**Orden recomendado:** Q1 → G1 parte 2 → Q3/Q7 → Q4/Q5 → G2 → G3. El resto según los números de Q1 y G4.
 
 ## 7. Lo que no verifiqué
 
@@ -247,7 +248,7 @@ Reglas para que no lo traten como contenido programático de baja calidad:
 
 ## 8. Propuesta para `CLAUDE.md` (Riesgos abiertos)
 
-> - **Bandwidth de Render free: 5 GB/mes.** Si se pasa sin tarjeta, el servicio queda apagado hasta el mes siguiente. El SSE manda el snapshot completo por voto: una sala de 12 × 107 ≈ 351 MB sin comprimir (`docs/STREAMER-SCALE-SEO.md`). No empujar campañas grandes sin eventos incrementales.
+> - **Bandwidth de Render free: 5 GB/mes.** Si se pasa sin tarjeta, el servicio queda apagado hasta el mes siguiente. Con eventos `voters` (PR #10), una sala de 12 × 107 manda ≈ 31,6 MB de SSE sin comprimir; antes eran 351 MB (`docs/STREAMER-SCALE-SEO.md`). Nunca volver a mandar el snapshot completo en cada voto.
 
 ## Fuentes
 
