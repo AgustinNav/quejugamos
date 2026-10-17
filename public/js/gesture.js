@@ -10,6 +10,12 @@ export const FLICK_MIN_DX = 24;
 /** Only the last stretch of the gesture counts for the release velocity. */
 export const VELOCITY_WINDOW_MS = 100;
 
+/** SuperLike fling (swipe up): clear distance AND speed, so a page scroll or a twitch never triggers it. */
+export const SUPERLIKE_MIN_DY = 140;
+export const SUPERLIKE_VELOCITY = 0.9;
+/** The fling must be mostly vertical: |dy| at least this many times |dx|. */
+export const SUPERLIKE_VERTICAL_RATIO = 2;
+
 const MAX_ROTATION_DEG = 18;
 const VERTICAL_FOLLOW = 0.35;
 const UNDER_SCALE = 0.95;
@@ -54,6 +60,21 @@ export function velocityX(samples, windowMs = VELOCITY_WINDOW_MS) {
   const first = samples.find((s) => last.t - s.t <= windowMs) ?? samples[0];
   const dt = last.t - first.t;
   return dt > 0 ? (last.x - first.x) / dt : 0;
+}
+
+/** Vertical velocity in px/ms (negative = upwards) over the last window of samples ({ t, y }, oldest first). */
+export function velocityY(samples, windowMs = VELOCITY_WINDOW_MS) {
+  return velocityX(samples.map((s) => ({ t: s.t, x: s.y })), windowMs);
+}
+
+/**
+ * True for a deliberate upward fling on the card. `scrolled` is whether the page itself moved during the
+ * gesture: then it was a scroll, whatever its speed, and never a vote.
+ */
+export function isSuperlikeFling({ dx, dy, vy, scrolled = false }) {
+  if (scrolled) return false;
+  if (dy > -SUPERLIKE_MIN_DY || -vy < SUPERLIKE_VELOCITY) return false;
+  return Math.abs(dy) >= Math.abs(dx) * SUPERLIKE_VERTICAL_RATIO;
 }
 
 /**

@@ -5,8 +5,9 @@ import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks, 
 import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
 import { renderUnder } from '../stack.js';
+import { superlikeAvailable } from '../superlike.js';
 
-const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
+const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅', superlike: '⭐' };
 
 let renderedGameId = null;
 let matchTimer = null;
@@ -141,12 +142,27 @@ function renderMyVote(room, state, myVote) {
   $('voteLikeBtn').setAttribute('aria-pressed', String(myVote === 'like'));
   $('voteNopeBtn').setAttribute('aria-pressed', String(myVote === 'nope'));
   $('votePlayedBtn').setAttribute('aria-pressed', String(myVote === 'played'));
+  $('voteSuperBtn').setAttribute('aria-pressed', String(myVote === 'superlike'));
+  renderSuperlikeButton(superlikeAvailable({
+    state, playerId: room.session.playerId, myVote, pendingElsewhere: room.optimistic?.vote === 'superlike',
+  }));
   $('voteBar').classList.toggle('has-vote', Boolean(myVote));
   showVoteStamp(myVote);
   const count = `${votedCount(state)}/${state.players.length}`;
   $('voteStatus').textContent = myVote
     ? `Votaste ${VOTE_EMOJI[myVote]} ✓ — esperando a los demás (${count}). Podés cambiarlo hasta que se cierre.`
-    : `${hasKeyboardAndMouse() ? 'Tu voto: ← nope · → like · J ya lo jugué' : 'Deslizá la tarjeta o tocá 👎 / ✅ / 👍'} (${count} votaron)`;
+    : `${hasKeyboardAndMouse() ? 'Tu voto: ← nope · → like · J ya lo jugué · S SuperLike' : 'Deslizá la tarjeta (hacia arriba = ⭐ SuperLike) o tocá un botón'} (${count} votaron)`;
+}
+
+// Disabled once the one SuperLike per room went to another card (the server enforces it with 409).
+function renderSuperlikeButton(available) {
+  const button = $('voteSuperBtn');
+  button.disabled = !available;
+  button.setAttribute('aria-label', available ? 'SuperLike (vale doble)' : 'SuperLike (ya la usaste)');
+  button.title = available
+    ? 'SuperLike: vale doble, una sola por sala (S o deslizá hacia arriba)'
+    : 'Ya usaste tu SuperLike en esta sala';
+  button.querySelector('.vote-label').textContent = available ? 'SuperLike' : 'usada';
 }
 
 // The hint follows the device, not the role: friends on a PC have the same keys as the host.

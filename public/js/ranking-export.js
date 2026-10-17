@@ -2,7 +2,7 @@
 // node:test covers it (test/ranking-export.test.ts). Numbers come from the server's frozen
 // `results`; `votes` only supplies the names of the likers still in the room. Rankings get posted
 // publicly, so player names are left out unless the caller opts in with `includeNames`.
-import { closedResults, playedOutResults, rankedResults } from './ranking-data.js';
+import { closedResults, playedOutResults, rankedResults, rankScore } from './ranking-data.js';
 
 export const SITE = 'quejugamos.com.ar';
 export const MAX_ITEMS = 10;
@@ -10,18 +10,18 @@ const MAX_NAMES = 4;
 
 const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0] || '';
 
-/** Default vote order, same as the results screen: likes desc, nopes asc, cheaper first, deck order last. */
+/** Default vote order, same as the results screen: score (SuperLike counts double) desc, nopes asc, cheaper first, deck order last. */
 export function rankedByVotes(state, priceOf = () => null) {
   const rows = rankedResults(state).map((result, index) => ({ result, index }));
-  rows.sort((a, b) => b.result.likes - a.result.likes || a.result.nopes - b.result.nopes
+  rows.sort((a, b) => rankScore(b.result) - rankScore(a.result) || a.result.nopes - b.result.nopes
     || (priceOf(a.result.gameId) ?? 99) - (priceOf(b.result.gameId) ?? 99) || a.index - b.index);
   return rows.map((r) => r.result);
 }
 
 /**
  * Everything the poster and the text need. `nameOf(gameId)` resolves a catalog name (falsy = unknown
- * game, skipped); `priceOf(gameId)` is only the ranking tie-break. Without `includeNames`, `players`
- * and every `likers` are empty, which makes both renderers drop those lines.
+ * game, skipped); `priceOf(gameId)` is only the ranking tie-break. The SuperLike count is always
+ * there; without `includeNames`, `players`, every `likers` and every `superlikers` are empty, which makes both renderers drop those lines.
  * @param {any} state
  * @param {{ nameOf: (gameId: string) => string | undefined, priceOf?: (gameId: string) => number | null, now?: Date, max?: number, includeNames?: boolean }} options
  */
@@ -32,8 +32,10 @@ export function buildExport(state, { nameOf, priceOf = () => null, now = new Dat
       position: i + 1,
       name: nameOf(r.gameId),
       likes: r.likes,
+      superlikes: r.superlikes ?? 0,
       match: r.match === true,
       likers: !includeNames ? [] : state.players.filter((p) => state.votes?.[r.gameId]?.[p.id] === 'like').map((p) => firstName(p.name)),
+      superlikers: !includeNames ? [] : state.players.filter((p) => (r.superlikedBy ?? []).includes(p.id)).map((p) => firstName(p.name)),
     }));
   return {
     code: state.code,
@@ -58,15 +60,25 @@ export function likersLabel(likers) {
   return likers.length > MAX_NAMES ? `${shown}…` : shown;
 }
 
-/** Plain-text ranking for the clipboard, e.g. "1. 💘 PEAK — 4 👍 (Agus, Juli…)". */
+/** "Agus, Juli · ⭐ Pedro": who liked it, then who spent a SuperLike on it (names only when opted in). */
+export function namesLabel(item) {
+  const likers = likersLabel(item.likers);
+  const superlikers = likersLabel(item.superlikers ?? []);
+  return [likers, superlikers && `⭐ ${superlikers}`].filter(Boolean).join(' · ');
+}
+
+/** "4 👍 · ⭐ 1": the likes total (SuperLikes included) and, when there are any, how many were SuperLikes. */
+export const scoreLabel = (item) => `${item.likes} 👍${item.superlikes ? ` · ⭐ ${item.superlikes}` : ''}`;
+
+/** Plain-text ranking for the clipboard, e.g. "1. 💘 PEAK — 4 👍 · ⭐ 1 (Agus, Juli…)". */
 export function formatRankingText(model) {
   const lines = [`¿Qué Jugamos? — ranking del ${model.date}`];
   if (model.players.length) lines.push(`Jugaron: ${model.players.join(', ')}`);
   lines.push('');
   if (!model.items.length) lines.push('No se llegó a votar ningún juego.');
   for (const item of model.items) {
-    const who = likersLabel(item.likers);
-    lines.push(`${item.position}. ${item.match ? '💘 ' : ''}${item.name} — ${item.likes} 👍${who ? ` (${who})` : ''}`);
+    const who = namesLabel(item);
+    lines.push(`${item.position}. ${item.match ? '💘 ' : ''}${item.name} — ${scoreLabel(item)}${who ? ` (${who})` : ''}`);
   }
   if (model.total > model.items.length) lines.push(`… y ${model.total - model.items.length} más`);
   if (model.played.length) lines.push('', `Ya jugados: ${model.played.join(', ')}`);

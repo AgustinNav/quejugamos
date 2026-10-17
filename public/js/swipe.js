@@ -7,7 +7,8 @@
 //   animation, which swaps the next game in while the card is hidden (prepareNextCard/revealNextCard).
 import { $ } from './dom.js';
 import {
-  dragFrame, flyOutTarget, lockAxis, releaseDecision, swipeThreshold, velocityX, VELOCITY_WINDOW_MS,
+  dragFrame, flyOutTarget, isSuperlikeFling, lockAxis, releaseDecision, swipeThreshold, velocityX, velocityY,
+  VELOCITY_WINDOW_MS,
 } from './gesture.js';
 import { freezeUnder, unfreezeUnder } from './stack.js';
 
@@ -30,6 +31,7 @@ let drag = null;
 let rafId = 0;
 let generation = 0; // bumps on every animation so a stale cleanup never undoes a newer one
 let suppressClicksUntil = 0;
+let fling = null; // touch tracking for the SuperLike swipe up (page scroll keeps working, see bindFling)
 
 const card = () => $('card');
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -98,6 +100,8 @@ export function showVoteStamp(vote) {
   const el = card();
   el.classList.toggle('voted-like', vote === 'like');
   el.classList.toggle('voted-nope', vote === 'nope');
+  // Class toggling (not re-adding) keeps the 2 s star animation from restarting on every re-render.
+  el.classList.toggle('voted-superlike', vote === 'superlike');
 }
 
 /** Instant reset, no animation (leaving the room, or a state the animations did not expect). */
@@ -109,6 +113,7 @@ export function resetCard() {
   el.classList.remove('moving', 'fading', 'played-out', 'rejected-out');
   el.style.transition = '';
   el.style.opacity = '';
+  fling = null;
   applyOffset(REST);
   setStamps(null, null);
   setUnderScale(null);
@@ -124,9 +129,11 @@ function abortDrag() {
 }
 
 // Throws the card off screen from wherever it is, keeping the release velocity (px/ms).
-function throwCard(direction, { vx = 0, width = card().offsetWidth } = {}) {
+function throwCard(direction, { vx = 0, width = card().offsetWidth, superlike = false } = {}) {
   abortDrag();
-  setStamps(direction === 'right' ? 1 : 0, direction === 'right' ? 0 : 1);
+  // A superlike shows its own star (voted-superlike), never the LIKE stamp.
+  if (superlike) setStamps(0, 0);
+  else setStamps(direction === 'right' ? 1 : 0, direction === 'right' ? 0 : 1);
   if (reducedMotion()) {
     setUnderScale(1);
     out = fadeCard('0');
@@ -139,8 +146,8 @@ function throwCard(direction, { vx = 0, width = card().offsetWidth } = {}) {
 }
 
 /** Card closed by the room: fly towards the result, unless the own swipe already threw it. */
-export function flyOut(direction) {
-  return out ?? throwCard(direction);
+export function flyOut(direction, { superlike = false } = {}) {
+  return out ?? throwCard(direction, { superlike });
 }
 
 /** Most voters had played it: the card shrinks and fades in place with its own stamp, never as LIKE/NOPE. */
@@ -326,8 +333,43 @@ function onPointerCancel(e) {
   if (wasDragging) springBack();
 }
 
+// ---------- SuperLike: swipe up ----------
+// Touch events, not pointer events: when the browser takes a vertical gesture for a page scroll it
+// cancels the pointer stream, but touchstart/move/end keep coming. We never preventDefault here, so
+// scrolling is untouched; a fling counts only if it is fast, long, mostly vertical AND the page did
+// not move (a scroll that merely ended with speed is a scroll).
+
+function onFlingStart(e, canSwipe) {
+  fling = null;
+  if (e.touches.length !== 1 || out || drag) return;
+  if (e.target.closest(NO_DRAG) || document.body.classList.contains('gallery-open') || !canSwipe()) return;
+  const t = e.touches[0];
+  fling = { x0: t.clientX, y0: t.clientY, scrollY0: window.scrollY, samples: [{ t: e.timeStamp, y: t.clientY }] };
+}
+
+function onFlingMove(e) {
+  if (!fling || e.touches.length !== 1) return void (fling = null); // a second finger (pinch) is not a fling
+  const samples = fling.samples;
+  samples.push({ t: e.timeStamp, y: e.touches[0].clientY });
+  while (samples.length > 2 && e.timeStamp - samples[0].t > VELOCITY_WINDOW_MS * 2) samples.shift();
+}
+
+function onFlingEnd(e, onSwipe) {
+  const gesture = fling;
+  fling = null;
+  if (!gesture || e.touches.length > 0 || drag?.axis === 'x') return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - gesture.x0;
+  const dy = t.clientY - gesture.y0;
+  const vy = velocityY([...gesture.samples, { t: e.timeStamp, y: t.clientY }]);
+  const scrolled = Math.abs(window.scrollY - gesture.scrollY0) > 2;
+  if (!isSuperlikeFling({ dx, dy, vy, scrolled })) return;
+  suppressClicksUntil = performance.now() + CLICK_SUPPRESS_MS;
+  if (onSwipe('superlike') === 'leave') throwCard('right', { superlike: true });
+}
+
 /**
- * onSwipe(vote) receives 'like' | 'nope' and returns 'leave' when that vote closes the card (it is
+ * onSwipe(vote) receives 'like' | 'nope' (drag) or 'superlike' (swipe up) and returns 'leave' when that vote closes the card (it is
  * thrown out) or 'stay' (it springs back showing the vote). canSwipe() can lock the card.
  */
 export function bindSwipe({ onSwipe, canSwipe }) {
@@ -336,6 +378,10 @@ export function bindSwipe({ onSwipe, canSwipe }) {
   el.addEventListener('pointermove', onPointerMove);
   el.addEventListener('pointerup', (e) => onPointerUp(e, onSwipe));
   el.addEventListener('pointercancel', onPointerCancel);
+  el.addEventListener('touchstart', (e) => onFlingStart(e, canSwipe), { passive: true });
+  el.addEventListener('touchmove', onFlingMove, { passive: true });
+  el.addEventListener('touchend', (e) => onFlingEnd(e, onSwipe), { passive: true });
+  el.addEventListener('touchcancel', () => { fling = null; }, { passive: true });
   // iOS Safari can still start a scroll or rubber-band mid-swipe; once the swipe owns the
   // gesture, block the touch default. Not passive, or preventDefault is ignored.
   el.addEventListener('touchmove', (e) => { if (drag?.axis === 'x') e.preventDefault(); }, { passive: false });

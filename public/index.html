@@ -135,6 +135,7 @@
       <div class="stamp like" aria-hidden="true">LIKE</div>
       <div class="stamp nope" aria-hidden="true">NOPE</div>
       <div class="stamp played" aria-hidden="true">YA JUGADO ✅</div>
+      <div class="stamp superlike" aria-hidden="true"><span class="superlike-star">⭐</span><span>SUPERLIKE</span></div>
       <div class="media" id="media">
         <video id="video" playsinline muted loop></video>
         <span class="deal-badge" id="dealBadge" hidden></span>
@@ -181,7 +182,7 @@
           <button class="btn ghost" type="button" id="nextBtn" title="Forzar siguiente (N)">Forzar siguiente ⏭</button>
           <button class="btn ghost close-room-btn" type="button" data-close-room>🔒 Cerrar sala</button>
         </div>
-        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>J</kbd> ya lo jugué · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
+        <p class="kbd-help">Tu voto: <kbd>←</kbd> nope · <kbd>→</kbd> like · <kbd>J</kbd> ya lo jugué · <kbd>S</kbd> SuperLike · <kbd>N</kbd> forzar siguiente · <kbd>Z</kbd> deshacer · <kbd>M</kbd> sonido · <kbd>+</kbd>/<kbd>−</kbd> volumen · <kbd>G</kbd> galería</p>
       </section>
 
       <div class="vote-bar" id="voteBar">
@@ -190,6 +191,7 @@
           <button class="vote-btn nope" type="button" id="voteNopeBtn" aria-pressed="false" aria-label="No me copa (nope)" title="No me copa (←)">👎<span class="vote-label">No me copa</span></button>
           <button class="vote-btn played" type="button" id="votePlayedBtn" aria-pressed="false" aria-label="Ya lo jugué" title="Ya lo jugué (J)">✅<span class="vote-label">Ya lo jugué</span></button>
           <button class="vote-btn like" type="button" id="voteLikeBtn" aria-pressed="false" aria-label="Me copa (like)" title="Me copa (→)">👍<span class="vote-label">Me copa</span></button>
+          <button class="vote-btn super" type="button" id="voteSuperBtn" aria-pressed="false" aria-label="SuperLike (vale doble)" title="SuperLike: vale doble, una sola por sala (S o deslizá hacia arriba)">⭐<span class="vote-label">SuperLike</span></button>
         </div>
       </div>
     </aside>
@@ -285,6 +287,15 @@
       <button class="gallery-nav next" type="button" id="galleryNext" aria-label="Siguiente" title="Siguiente (→)">›</button>
     </div>
     <div class="gallery-thumbs" id="galleryThumbs" aria-label="Trailers y capturas"></div>
+  </dialog>
+
+  <dialog class="confirm-dialog" id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmBody"></p>
+    <div class="confirm-actions">
+      <button class="btn" type="button" id="confirmCancel">Cancelar</button>
+      <button class="btn" type="button" id="confirmOk">Confirmar</button>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" role="alert" hidden></div>

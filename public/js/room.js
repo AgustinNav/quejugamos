@@ -13,6 +13,7 @@ import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
 import { renderVoting, forgetRenderedGame, announceResult, isRejectedByAll, currentGameId, gameName } from './views/voting.js';
 import { renderResults } from './views/results.js';
 import { closeRankingSheet, syncRankingSheet } from './ranking-sheet.js';
+import { dismissConfirm } from './confirm-dialog.js';
 
 const RECONNECT_DELAY_MS = 3000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -51,6 +52,7 @@ export function enterRoom(code) {
 function disposeRoom(room) {
   room.disposed = true;
   closeRankingSheet({ resume: false });
+  dismissConfirm();
   room.stopKeepAlive();
   room.es?.close();
   clearTimeout(room.retryTimer);
@@ -375,7 +377,8 @@ export function beginOptimisticAdvance(room, vote) {
   animateClose(room, async () => {
     await Promise.resolve(); // a swipe release throws the card with its own velocity right after this call
     // Votes are hidden, so the result is unknown: "played" exits neutrally instead of guessing a stamp.
-    return vote === 'played' ? fadeAway() : flyOut(vote === 'like' ? 'right' : 'left');
+    if (vote === 'played') return fadeAway();
+    return vote === 'nope' ? flyOut('left') : flyOut('right', { superlike: vote === 'superlike' });
   });
 }
 
