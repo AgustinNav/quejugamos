@@ -1,6 +1,7 @@
 // Trailer sound: one muted flag + one volume level shared by the card and the gallery.
 // Muted on every load (browsers block unmuted autoplay); the level the user picks is remembered.
 // The rules live in volume.js; this module applies them to the <video> elements.
+import { hlsLikelySupported } from './hls-loader.js';
 import { initialAudioState, outputGain, steppedVolume, syncedFromElement, toggledMute, withVolume } from './volume.js';
 
 // v2: earlier builds could store their old 0.7 default, which is exactly the "too loud" level.
@@ -14,7 +15,7 @@ const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 // ManagedMediaSource) and mp4 with crossOrigin are; Safari's native HLS player is not reliably
 // routed (WebKit has output silence for it). So devices without hls.js support (iPhone < iOS 17.1)
 // get mute-only: decided per device, never per trailer, so a routed element never goes silent.
-const webAudioCandidate = !volumeSupported && Boolean(AudioContextClass) && Boolean(window.Hls?.isSupported?.());
+const webAudioCandidate = !volumeSupported && Boolean(AudioContextClass) && hlsLikelySupported();
 let webAudioFailed = false;
 let audioContext = null;
 // <video> → GainNode. Only #video and #galleryVideo are ever routed; both are static elements

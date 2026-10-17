@@ -27,7 +27,7 @@ function state(o: Record<string, unknown> = {}) {
 
 describe('ranking-export', () => {
   test('orders by likes, marks matches, uses first names, skips unknown games', () => {
-    const m = buildExport(state(), { nameOf, now });
+    const m = buildExport(state(), { nameOf, now, includeNames: true });
     assert.deepEqual(m.items.map((i: { name: string }) => i.name), ['PEAK', 'R.E.P.O.']);
     assert.deepEqual(m.players, ['Agus', 'Juli']);
     assert.deepEqual(m.items[0].likers, ['Agus', 'Juli']);
@@ -44,12 +44,28 @@ describe('ranking-export', () => {
   });
 
   test('text format: position, match marker, likes, names', () => {
-    const text = formatRankingText(buildExport(state(), { nameOf, now }));
+    const text = formatRankingText(buildExport(state(), { nameOf, now, includeNames: true }));
     assert.match(text, /^¿Qué Jugamos\? — ranking del 14\/10\/2026/);
     assert.match(text, /1\. 💘 PEAK — 2 👍 \(Agus, Juli\)/);
     assert.match(text, /2\. R\.E\.P\.O\. — 1 👍 \(Agus\)/);
     assert.match(text, /Ya jugados: Old Game/);
     assert.match(text, /quejugamos\.com\.ar$/);
+  });
+
+  test('names are off by default: no players, no likers, no "Jugaron", counts and site kept', () => {
+    const m = buildExport(state(), { nameOf, now });
+    assert.deepEqual(m.players, []);
+    assert.ok(m.items.every((i: { likers: string[] }) => i.likers.length === 0));
+    const text = formatRankingText(m);
+    assert.doesNotMatch(text, /Jugaron|Agus|Juli|\(/);
+    assert.match(text, /1\. 💘 PEAK — 2 👍$/m);
+    assert.match(text, /2\. R\.E\.P\.O\. — 1 👍$/m);
+    assert.match(text, /quejugamos\.com\.ar$/);
+  });
+
+  test('includeNames adds the Jugaron line and the likers', () => {
+    const text = formatRankingText(buildExport(state(), { nameOf, now, includeNames: true }));
+    assert.match(text, /Jugaron: Agus, Juli/);
   });
 
   test('empty ranking still produces valid text', () => {
@@ -61,7 +77,7 @@ describe('ranking-export', () => {
   test('likers are truncated with an ellipsis; none = no parentheses', () => {
     assert.equal(likersLabel(['a', 'b', 'c', 'd', 'e']), 'a, b, c, d…');
     assert.equal(likersLabel([]), '');
-    const m = buildExport(state({ votes: {} }), { nameOf, now });
+    const m = buildExport(state({ votes: {} }), { nameOf, now, includeNames: true });
     assert.doesNotMatch(formatRankingText(m), /\(/);
   });
 

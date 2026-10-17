@@ -9,6 +9,7 @@ import { buildExport } from '../ranking-export.js';
 import { copyRankingText, savePoster } from '../ranking-share.js';
 
 const PREFS_KEY = 'quejugamos:ranking-view';
+const NAMES_KEY = 'quejugamos:export-names'; // separate from PREFS_KEY so "Quitar filtros" never touches it
 
 const THUMBS_TO_FETCH = 10;
 const UNVOTED_VISIBLE = 12;
@@ -44,6 +45,23 @@ function loadPrefs() {
   } catch (err) {
     console.warn('[results] could not read the ranking view:', err);
     return { ...DEFAULT_PREFS };
+  }
+}
+
+function loadIncludeNames() {
+  try {
+    return localStorage.getItem(NAMES_KEY) === '1';
+  } catch (err) {
+    console.warn('[results] could not read the export names choice:', err);
+    return false;
+  }
+}
+
+function saveIncludeNames(on) {
+  try {
+    localStorage.setItem(NAMES_KEY, on ? '1' : '0');
+  } catch (err) {
+    console.warn('[results] could not save the export names choice:', err);
   }
 }
 
@@ -193,7 +211,7 @@ function status(message) {
 }
 
 function exportModel() {
-  return buildExport(lastState, { nameOf: (id) => getGame(id)?.name, priceOf: (id) => (getGame(id) ? priceUsd(getGame(id)) : null) });
+  return buildExport(lastState, { nameOf: (id) => getGame(id)?.name, priceOf: (id) => (getGame(id) ? priceUsd(getGame(id)) : null), includeNames: $('rankNames').checked });
 }
 
 async function run(button, work, doneText, failText) {
@@ -227,6 +245,9 @@ export function bindResultsTools(getState) {
     apply();
     $('rankSort').focus();
   });
+  const names = $('rankNames');
+  names.checked = loadIncludeNames();
+  names.addEventListener('change', () => saveIncludeNames(names.checked));
   $('rankSaveBtn').addEventListener('click', () => {
     if (lastState) run($('rankSaveBtn'), () => savePoster(exportModel()), 'Ranking guardado', 'No se pudo guardar el ranking');
   });

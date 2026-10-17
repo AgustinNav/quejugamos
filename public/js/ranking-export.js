@@ -1,6 +1,7 @@
 // Pure model + text for exporting the final ranking (PNG poster and plain text). No DOM, so
 // node:test covers it (test/ranking-export.test.ts). Numbers come from the server's frozen
-// `results`; `votes` only supplies the names of the likers still in the room.
+// `results`; `votes` only supplies the names of the likers still in the room. Rankings get posted
+// publicly, so player names are left out unless the caller opts in with `includeNames`.
 import { closedResults, playedOutResults, rankedResults } from './ranking-data.js';
 
 export const SITE = 'quejugamos.com.ar';
@@ -19,11 +20,12 @@ export function rankedByVotes(state, priceOf = () => null) {
 
 /**
  * Everything the poster and the text need. `nameOf(gameId)` resolves a catalog name (falsy = unknown
- * game, skipped); `priceOf(gameId)` is only the ranking tie-break.
+ * game, skipped); `priceOf(gameId)` is only the ranking tie-break. Without `includeNames`, `players`
+ * and every `likers` are empty, which makes both renderers drop those lines.
  * @param {any} state
- * @param {{ nameOf: (gameId: string) => string | undefined, priceOf?: (gameId: string) => number | null, now?: Date, max?: number }} options
+ * @param {{ nameOf: (gameId: string) => string | undefined, priceOf?: (gameId: string) => number | null, now?: Date, max?: number, includeNames?: boolean }} options
  */
-export function buildExport(state, { nameOf, priceOf = () => null, now = new Date(), max = MAX_ITEMS } = {}) {
+export function buildExport(state, { nameOf, priceOf = () => null, now = new Date(), max = MAX_ITEMS, includeNames = false } = {}) {
   const items = rankedByVotes(state, priceOf)
     .filter((r) => nameOf(r.gameId))
     .map((r, i) => ({
@@ -31,12 +33,12 @@ export function buildExport(state, { nameOf, priceOf = () => null, now = new Dat
       name: nameOf(r.gameId),
       likes: r.likes,
       match: r.match === true,
-      likers: state.players.filter((p) => state.votes?.[r.gameId]?.[p.id] === 'like').map((p) => firstName(p.name)),
+      likers: !includeNames ? [] : state.players.filter((p) => state.votes?.[r.gameId]?.[p.id] === 'like').map((p) => firstName(p.name)),
     }));
   return {
     code: state.code,
     date: formatDate(now),
-    players: state.players.map((p) => firstName(p.name)).filter(Boolean),
+    players: !includeNames ? [] : state.players.map((p) => firstName(p.name)).filter(Boolean),
     total: items.length,
     items: items.slice(0, max),
     played: playedOutResults(state).map((r) => nameOf(r.gameId)).filter(Boolean),

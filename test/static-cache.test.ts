@@ -114,7 +114,7 @@ describe('static files: Cache-Control, ETag and 304', () => {
   });
 
   test('images are cacheable for a day', async () => {
-    const png = await request(srv.port, '/og-image.png', 'HEAD');
+    const png = await request(srv.port, '/og-image.jpg', 'HEAD');
     assert.equal(png.status, 200);
     assert.equal(png.headers['cache-control'], 'public, max-age=86400');
     assert.ok(png.headers.etag);
