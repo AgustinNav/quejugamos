@@ -1,4 +1,4 @@
-// In-app confirmation dialog (replaces the native confirm(), which blocks the page, ignores our
+// In-app confirmation dialog (replaces the browser's native confirm dialog, which blocks the page, ignores our
 // styling and is suppressed by some embedded browsers). One static <dialog id="confirmDialog"> in
 // index.html; showModal() gives the focus trap and the Esc key. Text always goes in through
 // textContent, so a player name can never inject markup.
