@@ -37,3 +37,17 @@ export function createOnce(capacity = 32) {
     return true;
   };
 }
+
+/**
+ * Applies an SSE `voters` event ({ version, currentVoters }) to the current server state.
+ * The event carries only what a vote on the open card changes, so it is valid solely on top of
+ * the state one version before it:
+ *  - null      stale (version ≤ current) or no state yet: nothing to do.
+ *  - 'resync'  a gap or a malformed event: the caller refetches the full snapshot.
+ *  - otherwise the next state, to go through the same path as a full snapshot.
+ */
+export function applyVotersEvent(state, event) {
+  if (!state || !Number.isInteger(event?.version) || event.version <= state.version) return null;
+  if (event.version !== state.version + 1 || !Array.isArray(event.currentVoters)) return 'resync';
+  return { ...state, currentVoters: event.currentVoters, version: event.version };
+}

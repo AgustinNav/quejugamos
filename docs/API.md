@@ -140,14 +140,18 @@ Clients must tolerate a `stale: true` response from an older cache that has only
 ## SSE `/api/rooms/:code/events?ticket=...`
 
 - `EventSource` can't send an `Authorization` header, so a member first trades its token for a ticket (`POST /stream-ticket`) and puts the ticket, never the token, in the URL. Tickets are 128 random bits (base64url), single use, valid 30 s, bound to (room, playerId); up to 4 outstanding per player. They are never logged by the app; a proxy access log may record the URL, which is why they are single use and short-lived.
-- On connect the server immediately sends `event: state` with the full snapshot (this is the reconnection strategy: there are no diffs, the client always replaces its state).
-- After that, one `event: state` on every change, plus a `: ping` comment every 25 s so proxies don't close the connection.
+- On connect the server immediately sends `event: state` with the full snapshot (this is the reconnection strategy: the client replaces its state).
+- After that, exactly one event per change (per `version`), plus a `: ping` comment every 25 s so proxies don't close the connection:
+  - `event: voters` with `{ "version": 18, "currentVoters": ["p_1a2b3c"] }` when a `vote` leaves the card open (same `phase` and `index`): only `currentVoters` and `version` changed. Who voted, never what. It exists for bandwidth: re-sending the whole snapshot to every stream on every vote made a room's traffic grow with players² × cards² (`docs/STREAMER-SCALE-SEO.md`).
+  - `event: state` with the full snapshot for every other change, including the vote that closes a card.
+- Applying `voters`: valid only on top of the state at `version - 1`. Ignore it when its `version` ≤ the client's; when it is newer than the client's `version + 1` (a missed event) or malformed, refetch `GET /api/rooms/:code` with the token instead of patching.
+- The `POST /vote` response is unchanged: always the full snapshot plus `myVote`.
 - When the room expires: `event: closed` and the server ends the stream.
 - Caps: 50 streams per room, 20 per client, 2000 per server. Over a cap: `503 capacity` (JSON, no stream).
 - A client that stops reading (more than 64 KB pending) is disconnected and reconnects with a fresh ticket, getting a fresh snapshot.
 - **Reconnection is manual**: native `EventSource` auto-reconnect would reuse the URL, whose ticket is already spent (401). On `error` the client closes the `EventSource`, shows "reconectando…", and after a backoff (3 s doubling up to 30 s, reset on `open`) fetches `GET /api/rooms/:code` with its token (404 → "La sala se cerró"; public view → kicked) and connects again with a new ticket. A 401 from `stream-ticket` is retried once, then the session is treated as invalid.
 - Live streams are the room's presence: see **Empty rooms**.
-- **Deploy note**: this contract (tickets, member-only snapshot) shipped together on client and server. A tab opened before that deploy keeps reconnecting to the old ticketless URL (401) and needs a reload.
+- **Deploy note**: this contract (tickets, member-only snapshot) shipped together on client and server. A tab opened before that deploy keeps reconnecting to the old ticketless URL (401) and needs a reload. Same for `voters`: a tab loaded before it shipped has no listener for it, so "who voted" only refreshes on the next `state` (card close) until a reload; votes and results are unaffected.
 
 ## SEO and crawler endpoints
 
