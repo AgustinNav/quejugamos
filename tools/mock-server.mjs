@@ -101,7 +101,10 @@ function snapshot(room) {
 
 function ownVote(room, player) {
   const gameId = openCardId(room);
-  return { playerId: player.id, gameId, vote: (gameId && room.votes[gameId]?.[player.id]) || null };
+  return {
+    playerId: player.id, gameId, vote: (gameId && room.votes[gameId]?.[player.id]) || null,
+    superlikeAvailable: !Object.values(room.votes).some((byPlayer) => byPlayer[player.id] === 'superlike'),
+  };
 }
 
 // Same privacy rule as the real server: names, votes, results and deck only for members.
@@ -180,12 +183,14 @@ function validPlayerCountFields(filters) {
 // Same rule as the real server: the tally is frozen at close; playedOut = strict majority of votes cast.
 function closeCard(room) {
   const gameId = room.deck[room.index];
-  const votes = Object.values(room.votes[gameId] || {});
-  const likes = votes.filter((v) => v === 'like').length;
+  const entries = Object.entries(room.votes[gameId] || {});
+  const votes = entries.map(([, v]) => v);
+  const superlikedBy = entries.filter(([, v]) => v === 'superlike').map(([id]) => id).sort();
+  const likes = votes.filter((v) => v === 'like' || v === 'superlike').length; // likes INCLUDES superlikes
   const nopes = votes.filter((v) => v === 'nope').length;
   const played = votes.filter((v) => v === 'played').length;
   room.lastResult = {
-    gameId, likes, nopes, played, playedOut: played * 2 > likes + nopes + played, match: likes === room.players.length,
+    gameId, likes, superlikes: superlikedBy.length, superlikedBy, nopes, played, playedOut: played * 2 > likes + nopes + played, match: likes === room.players.length,
   };
   room.history.push(room.lastResult);
   room.index += 1;
@@ -279,14 +284,19 @@ async function vote(req, res, room) {
   const body = await readJson(req);
   const player = auth(req, room);
   if (room.phase !== 'voting') throw new HttpError(409, 'not_voting', 'No hay votación');
-  if (!['like', 'nope', 'played', null].includes(body.vote) || typeof body.gameId !== 'string') throw new HttpError(400, 'invalid_vote', 'Voto inválido');
+  if (!['like', 'nope', 'played', 'superlike', null].includes(body.vote) || typeof body.gameId !== 'string') throw new HttpError(400, 'invalid_vote', 'Voto inválido');
   if (body.gameId !== room.deck[room.index]) throw new HttpError(409, 'not_current_game', 'No es la tarjeta actual');
+  // One SuperLike per player per room: a superlike on any OTHER card (closed, so frozen) blocks a new one.
+  if (body.vote === 'superlike' && Object.entries(room.votes).some(([id, byPlayer]) => id !== body.gameId && byPlayer[player.id] === 'superlike')) {
+    throw new HttpError(409, 'superlike_used', 'Ya usaste tu SuperLike');
+  }
   const votes = (room.votes[body.gameId] ||= {});
   if (body.vote === null) delete votes[player.id];
   else votes[player.id] = body.vote;
   if (allVoted(room)) closeCard(room);
   changed(room);
-  sendJson(res, 200, { ...snapshot(room), myVote: ownVote(room, player).vote });
+  const mine = ownVote(room, player);
+  sendJson(res, 200, { ...snapshot(room), myVote: mine.vote, superlikeAvailable: mine.superlikeAvailable });
 }
 
 function me(req, res, room) {
