@@ -206,7 +206,7 @@ Reglas para que no lo traten como contenido programático de baja calidad:
 - Cada juego de `GAMES` tiene su página (200); un id desconocido da 404; un path malformado da 4xx y el proceso sigue vivo.
 - El sitemap lista exactamente las rutas renderizadas.
 - Todo JSON-LD parsea con `JSON.parse`; cada página tiene canonical absoluto y `<title>` único.
-- Ningún HTML contiene "Tinder"; ningún HTML tiene `style=`, `<style>` ni `<script>` ejecutable inline.
+- Ningún HTML contiene la marca prohibida (`CLAUDE.md`, sección Marca); ningún HTML tiene `style=`, `<style>` ni `<script>` ejecutable inline.
 - Las rutas de sala mantienen el `noindex` y no llevan canonical.
 
 ## 6. Plan priorizado
