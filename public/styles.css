@@ -741,6 +741,8 @@ html { overscroll-behavior-x: none; }
   color: #fff; border-color: var(--super); background: rgba(24, 28, 70, .72); white-space: nowrap;
   font-size: 44px; font-weight: 800; line-height: 1.1; padding: 6px 26px 10px;
   transform: translate(-50%, -50%) rotate(-6deg); box-shadow: 0 0 40px rgba(141,155,255,.65);
+  /* Above .media-actions (z-index 6): the trailer controls must not cover the star. */
+  z-index: 7; pointer-events: none;
 }
 .superlike-star { font-size: 110px; line-height: 1; }
 .card.voted-superlike .stamp.superlike { animation: superlike-pop 2s ease-out forwards; }
