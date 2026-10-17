@@ -26,6 +26,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function parsePlatforms(value: unknown, known: readonly string[]): string[] {
   if (!Array.isArray(value) || value.length > known.length * 2) throw invalidFilters('platforms must be an array of strings');
+  if (value.length === 0) throw invalidFilters('Choose at least one platform');
   for (const p of value) {
     if (typeof p !== 'string' || !known.includes(p)) throw invalidFilters(`Unknown platform. Valid: ${known.join(', ')}`);
   }

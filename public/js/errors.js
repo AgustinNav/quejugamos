@@ -8,6 +8,7 @@ const MESSAGES = {
   name_taken: 'Ya hay alguien con ese nombre en la sala. Probá con otro (o agregale un apodo).',
   room_full: 'La sala está llena: entran hasta 12 jugadores.',
   room_finished: 'Esta votación ya terminó. Pedile al host que arme otra sala.',
+  no_platforms: 'Elegí al menos una plataforma: ¿en qué van a jugar?',
   invalid_filters: 'Esos filtros no son válidos. Revisalos y probá de nuevo.',
   unauthorized: 'Tu sesión en esta sala no es válida. Volvé a entrar con tu nombre.',
   not_host: 'Eso solo lo puede hacer el host de la sala.',

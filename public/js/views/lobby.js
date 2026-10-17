@@ -1,6 +1,7 @@
 // Lobby: host sees QR + filters + "Empezar"; players see who is in and wait.
 import { $, showScreen, renderNameList, toast } from '../dom.js';
 import { PLATFORMS } from '../catalog.js';
+import { INITIAL_PLATFORMS, togglePlatform as toggled } from '../platforms.js';
 import { qrDataUrl } from '../qr.js';
 import { roomUrl } from '../code.js';
 import { errorMessage } from '../errors.js';
@@ -9,7 +10,7 @@ const NO_PRICE_LIMIT = 70;
 const MAX_PLAYERS = 12;
 // playerCount null = automatic: games where everyone in the room fits. 5 stands for "5+".
 const PLAYER_COUNT_OPTIONS = [null, 2, 3, 4, 5];
-const filters = { platforms: [...PLATFORMS], maxPrice: NO_PRICE_LIMIT, playerCount: null };
+const filters = { platforms: [...INITIAL_PLATFORMS], maxPrice: NO_PRICE_LIMIT, playerCount: null };
 let roomPlayers = 1;
 let qrCode = null;
 
@@ -84,8 +85,8 @@ function priceLabel(value) {
 }
 
 function togglePlatform(platform) {
-  const on = filters.platforms.includes(platform);
-  filters.platforms = on ? filters.platforms.filter((p) => p !== platform) : [...filters.platforms, platform];
+  filters.platforms = toggled(filters.platforms, platform);
+  if (filters.platforms.length) setStartError(null);
   renderFilters();
   $('platformToggles').querySelector(`[data-platform="${platform}"]`)?.focus();
 }
@@ -118,7 +119,7 @@ export function bindLobby(onStart) {
   });
   $('copyLinkBtn').addEventListener('click', copyLink);
   $('startBtn').addEventListener('click', async () => {
-    if (!filters.platforms.length) return setStartError('invalid_filters');
+    if (!filters.platforms.length) return setStartError('no_platforms');
     setStartError(null);
     $('startBtn').disabled = true;
     try {

@@ -89,7 +89,7 @@ Measurement only: they never change the response, are not stored in the room and
 
 ## Start filters
 
-- `platforms`: a game passes if it shares at least one platform. `maxPrice`: USD or `null`; games with an unknown price always pass.
+- `platforms`: at least one, otherwise `400 invalid_filters`. A game passes if it shares at least one platform. `maxPrice`: USD or `null`; games with an unknown price always pass.
 - `playerCount`: `null` or an integer 1–32, otherwise `400 invalid_filters`.
   - A number N keeps games that support N players online: `min <= N <= max` (`players` in `public/games.js`). The lobby's "5+" sends `5`.
   - `null` = automatic: the legacy `fitsGroup` rule with the room's current player count.
