@@ -82,9 +82,9 @@ describe('full flow', () => {
     assert.deepEqual(v1.body.currentVoters, [room.playerId]);
     const v2 = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.body.playerToken);
     assert.equal(v2.body.index, 1);
-    assert.deepEqual(v2.body.lastResult, { gameId: first, likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
+    assert.deepEqual(v2.body.lastResult, { gameId: first, likes: 2, superlikes: 0, superlikedBy: [], nopes: 0, played: 0, playedOut: false, match: true });
     assert.equal(v2.body.myVote, null, 'the card closed: no vote on the new open card');
-    const { myVote: _ignored, ...v2Snapshot } = v2.body;
+    const { myVote: _ignored, superlikeAvailable: _ignoredToo, ...v2Snapshot } = v2.body;
 
     const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === v2.body.version);
     const pushed = JSON.parse(event.data);
@@ -162,7 +162,7 @@ describe('full flow', () => {
     assert.equal(kicked.status, 200);
     assert.ok(!kicked.body.players.some((p: { id: string }) => p.id === ghost.playerId));
     assert.equal(kicked.body.index, 1);
-    assert.deepEqual(kicked.body.lastResult, { gameId: first, likes: 2, nopes: 0, played: 0, playedOut: false, match: true });
+    assert.deepEqual(kicked.body.lastResult, { gameId: first, likes: 2, superlikes: 0, superlikedBy: [], nopes: 0, played: 0, playedOut: false, match: true });
 
     const event = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === kicked.body.version);
     assert.deepEqual(JSON.parse(event.data), kicked.body);
@@ -192,14 +192,14 @@ describe('full flow', () => {
     assert.deepEqual(hostVote.body.currentVoters, [room.playerId]);
     assert.equal(hostVote.body.votes[first], undefined, 'open-card votes stay private');
     const me = await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, room.playerToken);
-    assert.deepEqual(me.body, { playerId: room.playerId, gameId: first, vote: 'played' });
+    assert.deepEqual(me.body, { playerId: room.playerId, gameId: first, vote: 'played', superlikeAvailable: true });
     const outsider = await api(base, 'GET', `/api/rooms/${room.code}`);
     assert.ok(!JSON.stringify(outsider.body).includes('played'), 'non-members never see votes');
     const memberView = await api(base, 'GET', `/api/rooms/${room.code}`, undefined, ana.playerToken);
     assert.ok(!JSON.stringify(memberView.body.votes).includes('played'));
 
     const anaVote = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'played' }, ana.playerToken);
-    const expected = { gameId: first, likes: 0, nopes: 0, played: 2, playedOut: true, match: false };
+    const expected = { gameId: first, likes: 0, superlikes: 0, superlikedBy: [], nopes: 0, played: 2, playedOut: true, match: false };
     assert.deepEqual(anaVote.body.lastResult, expected);
     assert.deepEqual(anaVote.body.results, { [first]: expected });
     assert.equal(anaVote.body.myVote, null);
@@ -211,7 +211,7 @@ describe('full flow', () => {
     assert.equal(undo.body.index, 0);
     assert.deepEqual(undo.body.results, {});
     const log = srv.logs.map((l) => JSON.parse(l)).find((l) => l.event === 'card_closed' && l.roomCode === room.code);
-    assert.deepEqual(log, { severity: 'INFO', event: 'card_closed', roomCode: room.code, gameId: first, likes: 0, nopes: 0, played: 2, playedOut: true, match: false, finished: false });
+    assert.deepEqual(log, { severity: 'INFO', event: 'card_closed', roomCode: room.code, gameId: first, likes: 0, superlikes: 0, nopes: 0, played: 2, playedOut: true, match: false, finished: false });
   });
 
   test('start: unknown filter fields such as the retired excludeGameIds are ignored', async () => {
@@ -247,9 +247,9 @@ describe('full flow', () => {
 
     const me = await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, ana.playerToken);
     assert.equal(me.status, 200);
-    assert.deepEqual(me.body, { playerId: ana.playerId, gameId: first, vote: 'nope' });
+    assert.deepEqual(me.body, { playerId: ana.playerId, gameId: first, vote: 'nope', superlikeAvailable: true });
     const hostMe = await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, room.hostToken);
-    assert.deepEqual(hostMe.body, { playerId: room.playerId, gameId: first, vote: null });
+    assert.deepEqual(hostMe.body, { playerId: room.playerId, gameId: first, vote: null, superlikeAvailable: true });
     assert.equal((await api(base, 'GET', `/api/rooms/${room.code}/me`)).status, 401);
     const other = await createRoom();
     assert.equal((await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, other.hostToken)).status, 401);
