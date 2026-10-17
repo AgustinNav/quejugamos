@@ -130,3 +130,22 @@ describe('SseHub connection caps', () => {
     assert.equal(connect(hub, 'ROOM02', '1.1.1.1').ok, true);
   });
 });
+
+describe('SseHub voters event', () => {
+  test('broadcastVoters sends only version and currentVoters', () => {
+    const hub = makeHub();
+    const client = connect(hub, 'ROOM01', '1.1.1.1');
+    const snap = { ...snapshot('ROOM01', 7), phase: 'voting' as const, deck: ['valheim'], currentVoters: ['p_a', 'p_b'] };
+    hub.broadcastVoters('ROOM01', snap);
+    assert.equal(client.res.writes.at(-1), 'event: voters\ndata: {"version":7,"currentVoters":["p_a","p_b"]}\n\n');
+  });
+
+  test('broadcastVoters also drops stalled clients', () => {
+    const hub = makeHub({ maxBufferedBytes: 1024 });
+    const stalled = connect(hub, 'ROOM01', '1.1.1.1');
+    stalled.res.writableLength = 1025;
+    hub.broadcastVoters('ROOM01', snapshot('ROOM01', 2));
+    assert.equal(stalled.res.destroyed, true);
+    assert.equal(stalled.res.writes.length, 1);
+  });
+});

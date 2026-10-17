@@ -86,7 +86,10 @@ export const voteRoom: Handler = async (deps, { req, res, code }) => {
   const before = deps.store.snapshot(code);
   const token = bearerToken(req);
   const after = deps.store.vote(code, token, field(body, 'gameId'), field(body, 'vote'));
-  publish(deps, before, after);
+  // Same phase and card: only currentVoters (and version) changed, so streams get the small event.
+  const cardStillOpen = after.phase === before.phase && after.index === before.index;
+  if (cardStillOpen && after.version !== before.version) deps.hub.broadcastVoters(after.code, after);
+  else publish(deps, before, after);
   // Snapshots hide open-card votes, so the voter gets their own back here (null once the card closed).
   sendJson(res, 200, { ...after, myVote: deps.store.currentVote(code, token).vote });
 };

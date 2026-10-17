@@ -236,14 +236,14 @@ describe('full flow', () => {
     const voted = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'nope' }, ana.playerToken);
     assert.equal(voted.body.myVote, 'nope');
 
-    const pushed = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === voted.body.version);
+    const pushed = await sse.waitFor((e) => e.event === 'voters' && JSON.parse(e.data).version === voted.body.version);
+    assert.deepEqual(JSON.parse(pushed.data), { version: voted.body.version, currentVoters: [ana.playerId] });
+    assert.ok(!pushed.data.includes('nope'), 'open-card vote leaked');
     const snap = await api(base, 'GET', `/api/rooms/${room.code}`, undefined, room.hostToken);
-    for (const body of [snap.body, JSON.parse(pushed.data)]) {
-      assert.deepEqual(body.votes, {});
-      assert.deepEqual(body.currentVoters, [ana.playerId]);
-      assert.equal(body.myVote, undefined);
-      assert.ok(!JSON.stringify(body).includes('nope'), 'open-card vote leaked');
-    }
+    assert.deepEqual(snap.body.votes, {});
+    assert.deepEqual(snap.body.currentVoters, [ana.playerId]);
+    assert.equal(snap.body.myVote, undefined);
+    assert.ok(!JSON.stringify(snap.body).includes('nope'), 'open-card vote leaked');
 
     const me = await api(base, 'GET', `/api/rooms/${room.code}/me`, undefined, ana.playerToken);
     assert.equal(me.status, 200);
@@ -256,6 +256,35 @@ describe('full flow', () => {
     assert.equal((await api(base, 'GET', '/api/rooms/ZZZZZZ/me', undefined, ana.playerToken)).status, 404);
     assert.equal((await api(base, 'POST', `/api/rooms/${room.code}/me`, {}, ana.playerToken)).status, 405);
     await assertAlive();
+  });
+
+  test('SSE: a vote that leaves the card open sends only `voters`; the closing vote sends `state`', async () => {
+    const room = await createRoom();
+    const ana = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Ana' })).body;
+    const beto = (await api(base, 'POST', `/api/rooms/${room.code}/join`, { name: 'Beto' })).body;
+    const started = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: FILTERS }, room.hostToken);
+    const first = started.body.deck[0];
+    const sse = await openRoomSse(base, room.code, room.hostToken);
+    sseClients.push(sse);
+    await sse.waitFor((e) => e.event === 'state');
+
+    const v1 = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, ana.playerToken);
+    const changed = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'nope' }, ana.playerToken);
+    const v2 = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, beto.playerToken);
+    const closing = await api(base, 'POST', `/api/rooms/${room.code}/vote`, { gameId: first, vote: 'like' }, room.playerToken);
+    assert.equal(closing.body.index, 1);
+
+    const closed = await sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version === closing.body.version);
+    const { myVote: _ignored, ...closingSnapshot } = closing.body;
+    assert.deepEqual(JSON.parse(closed.data), closingSnapshot);
+    for (const [res, voters] of [[v1, [ana.playerId]], [changed, [ana.playerId]], [v2, [ana.playerId, beto.playerId]]] as const) {
+      const event = await sse.waitFor((e) => e.event === 'voters' && JSON.parse(e.data).version === res.body.version);
+      assert.deepEqual(JSON.parse(event.data), { version: res.body.version, currentVoters: voters });
+    }
+    await assert.rejects(
+      sse.waitFor((e) => e.event === 'state' && JSON.parse(e.data).version > started.body.version && JSON.parse(e.data).version < closing.body.version, 100),
+      /timeout/, 'no full snapshot for votes that leave the card open',
+    );
   });
 
   test('kick errors: unknown player, host, non-host, malformed id', async () => {
