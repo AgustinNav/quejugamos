@@ -6,7 +6,7 @@ import { markGuest } from './attribution.js';
 import { resetMedia } from './media.js';
 import { startKeepAlive } from './keepalive.js';
 import { fadeAway, flyOut, playedOut, prepareNextCard, rejectedOut, resetCard, revealNextCard } from './swipe.js';
-import { closeKey, createOnce, reconcileVote } from './reconcile.js';
+import { applyVotersEvent, closeKey, createOnce, reconcileVote } from './reconcile.js';
 import { showError } from './views/error.js';
 import { showJoin, setJoinError } from './views/join.js';
 import { renderHostLobby, renderPlayerLobby } from './views/lobby.js';
@@ -169,6 +169,7 @@ async function connect(room) {
   room.es = es;
   es.addEventListener('open', () => onStreamOpen(room, es));
   es.addEventListener('state', (e) => onStateEvent(room, e));
+  es.addEventListener('voters', (e) => onVotersEvent(room, e));
   es.addEventListener('closed', () => failRoom(room, 'closed'));
   es.addEventListener('error', () => onStreamError(room, es));
 }
@@ -202,6 +203,19 @@ function onStateEvent(room, event) {
   } catch (err) {
     console.error('[room] bad state event:', err);
   }
+}
+
+// Votes that leave the card open arrive as a small patch; a gap in versions means a missed event.
+function onVotersEvent(room, event) {
+  let next;
+  try {
+    next = applyVotersEvent(room.state, JSON.parse(event.data));
+  } catch (err) {
+    console.error('[room] bad voters event:', err);
+    next = 'resync';
+  }
+  if (next === 'resync') return void refreshRoom(room);
+  if (next) applySnapshot(room, next);
 }
 
 // Native auto-reconnect would reuse the URL, whose ticket is already spent (401). We take over:

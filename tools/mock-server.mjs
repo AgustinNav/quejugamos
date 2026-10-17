@@ -136,6 +136,21 @@ function changed(room) {
   scheduleBots(room);
 }
 
+// A vote that leaves the card open only changes who voted: streams get the small event (docs/API.md).
+function voted(room) {
+  if (!allVoted(room)) return votersChanged(room);
+  closeCard(room);
+  changed(room);
+}
+
+function votersChanged(room) {
+  room.version += 1;
+  const { version, currentVoters } = snapshot(room);
+  const data = `event: voters\ndata: ${JSON.stringify({ version, currentVoters })}\n\n`;
+  for (const res of room.clients) res.write(data);
+  scheduleBots(room);
+}
+
 function shuffle(list) {
   const copy = [...list];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -214,8 +229,7 @@ function botVote(room, bot, gameId) {
   if (room.phase !== 'voting' || room.deck[room.index] !== gameId || !rooms.has(room.code)) return;
   const vote = bot.bot === 'random' ? (crypto.randomInt(2) ? 'like' : 'nope') : bot.bot;
   (room.votes[gameId] ||= {})[bot.id] = vote;
-  if (allVoted(room)) closeCard(room);
-  changed(room);
+  voted(room);
 }
 
 // ---------- handlers ----------
@@ -284,8 +298,7 @@ async function vote(req, res, room) {
   const votes = (room.votes[body.gameId] ||= {});
   if (body.vote === null) delete votes[player.id];
   else votes[player.id] = body.vote;
-  if (allVoted(room)) closeCard(room);
-  changed(room);
+  voted(room);
   sendJson(res, 200, { ...snapshot(room), myVote: ownVote(room, player).vote });
 }
 

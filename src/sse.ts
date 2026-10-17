@@ -25,6 +25,10 @@ function stateEvent(snapshot: Snapshot): string {
   return `event: state\ndata: ${JSON.stringify(snapshot)}\n\n`;
 }
 
+function votersEvent({ version, currentVoters }: Snapshot): string {
+  return `event: voters\ndata: ${JSON.stringify({ version, currentVoters })}\n\n`;
+}
+
 export class SseHub {
   private readonly rooms = new Map<string, Set<ServerResponse>>();
   private readonly clientIps = new Map<ServerResponse, string>();
@@ -66,7 +70,18 @@ export class SseHub {
   }
 
   broadcast(code: string, snapshot: Snapshot): void {
-    const payload = stateEvent(snapshot);
+    this.sendToRoom(code, stateEvent(snapshot));
+  }
+
+  /**
+   * A vote that leaves the card open only changes who voted. Re-sending the whole snapshot to every
+   * client on every vote made a room's traffic grow with players² × cards² (docs/STREAMER-SCALE-SEO.md).
+   */
+  broadcastVoters(code: string, snapshot: Snapshot): void {
+    this.sendToRoom(code, votersEvent(snapshot));
+  }
+
+  private sendToRoom(code: string, payload: string): void {
     for (const res of [...(this.rooms.get(code) ?? [])]) this.send(code, res, payload);
   }
 
