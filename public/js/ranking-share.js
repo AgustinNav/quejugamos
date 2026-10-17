@@ -1,7 +1,7 @@
 // Saves/shares the final ranking as a PNG poster drawn with Canvas 2D, or copies it as text.
 // Text and shapes only: no remote images, so the canvas is never tainted (toBlob keeps working)
 // and the CSP needs no change. The data comes from ranking-export.js (frozen server results).
-import { formatRankingText, likersLabel, SITE } from './ranking-export.js';
+import { formatRankingText, namesLabel, scoreLabel, SITE } from './ranking-export.js';
 
 const W = 1080;
 const H = 1350;
@@ -63,12 +63,12 @@ function drawRow(ctx, item, y, rowH, family) {
   ctx.font = `700 34px ${family}`;
   ctx.fillText(item.match ? '💘' : String(item.position), PAD + 44, mid);
   ctx.textAlign = 'left';
-  const likes = `${item.likes} 👍`;
+  const likes = scoreLabel(item);
   ctx.font = `700 32px ${family}`;
   const likesW = ctx.measureText(likes).width;
   const textX = PAD + 92;
   const textW = W - PAD - 24 - likesW - textX - 16;
-  const who = likersLabel(item.likers);
+  const who = namesLabel(item);
   ctx.font = `700 34px ${family}`;
   ctx.fillStyle = COLORS.text;
   ctx.fillText(fit(ctx, item.name, textW), textX, who ? mid - 16 : mid);

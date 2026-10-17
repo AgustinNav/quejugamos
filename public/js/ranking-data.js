@@ -14,6 +14,12 @@ export const playedOutResults = (state) => closedResults(state).filter((r) => r.
 
 export const rankedResults = (state) => closedResults(state).filter((r) => !r.playedOut);
 
+/**
+ * Ranking score of a frozen result: `likes` already includes the superlikes, so adding them again makes
+ * a SuperLike count double. Results from before SuperLike existed have no `superlikes` (counts as 0).
+ */
+export const rankScore = (result) => result.likes + (result.superlikes ?? 0);
+
 /** Games nobody got to vote (only after an early finish): the discarded open card and everything after it. */
 export const unvotedGameIds = (state) => (finishedEarly(state) ? state.deck.slice(state.index) : []);
 

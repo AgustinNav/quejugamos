@@ -3,11 +3,16 @@ import { timingSafeEqual } from 'node:crypto';
 
 export type Phase = 'lobby' | 'voting' | 'finished';
 // played: "I already played this game". Counts as a cast vote (advances the card) but never as a like.
-export type Vote = 'like' | 'nope' | 'played';
+// superlike: a like that counts double in the ranking; one per player per room (see vote()).
+export type Vote = 'like' | 'nope' | 'played' | 'superlike';
 export type Filters = { platforms: string[]; maxPrice: number | null; fitsGroup: boolean; playerCount: number | null };
 export type PublicPlayer = { id: string; name: string; isHost: boolean };
 // playedOut: strict majority of the votes cast on the card were "played" (ranked apart, never a match).
-export type CardResult = { gameId: string; likes: number; nopes: number; played: number; playedOut: boolean; match: boolean };
+// likes INCLUDES superlikes, so match / playedOut math stays valid; superlikedBy is sorted for determinism.
+export type CardResult = {
+  gameId: string; likes: number; superlikes: number; superlikedBy: string[]; nopes: number; played: number;
+  playedOut: boolean; match: boolean;
+};
 
 export type Snapshot = {
   code: string;
@@ -27,7 +32,7 @@ export type Snapshot = {
 
 type Player = PublicPlayer & { token: string };
 
-export type CurrentVote = { playerId: string; gameId: string | null; vote: Vote | null };
+export type CurrentVote = { playerId: string; gameId: string | null; vote: Vote | null; superlikeAvailable: boolean };
 
 /** What a non-member may see: enough for the join screen, never names, votes, results or the deck. */
 export type PublicRoom = { code: string; phase: Phase; playerCount: number; maxPlayers: number };
@@ -200,14 +205,18 @@ export class RoomStore {
   vote(code: string, token: string | null, gameId: unknown, vote: unknown): Snapshot {
     const room = this.getRoom(code);
     const player = this.requirePlayer(room, token);
-    if (typeof gameId !== 'string' || !(vote === 'like' || vote === 'nope' || vote === 'played' || vote === null)) {
-      throw new RoomError(400, 'invalid_vote', 'Expected { gameId: string, vote: "like" | "nope" | "played" | null }');
+    if (typeof gameId !== 'string' || !isVoteValue(vote)) {
+      throw new RoomError(400, 'invalid_vote', 'Expected { gameId: string, vote: "like" | "nope" | "played" | "superlike" | null }');
     }
     if (room.phase !== 'voting') throw new RoomError(409, 'not_voting', 'The room is not voting');
     if (room.deck[room.index] !== gameId) throw new RoomError(409, 'not_current_game', 'That game is not the current card');
-    if (!applyVote(room, player.id, gameId, vote)) return toSnapshot(room);
-    if (everyoneVoted(room)) closeCurrentCard(room);
-    this.touch(room);
+    if (vote === 'superlike' && superlikeUsedElsewhere(room, player.id, gameId)) {
+      throw new RoomError(409, 'superlike_used', 'You already used your SuperLike in this room');
+    }
+    if (applyVote(room, player.id, gameId, vote)) {
+      if (everyoneVoted(room)) closeCurrentCard(room);
+      this.touch(room);
+    }
     return toSnapshot(room);
   }
 
@@ -329,7 +338,10 @@ export class RoomStore {
     const room = this.getRoom(code);
     const player = this.requirePlayer(room, token);
     const gameId = currentCardId(room);
-    return { playerId: player.id, gameId, vote: gameId ? room.votes[gameId]?.[player.id] ?? null : null };
+    return {
+      playerId: player.id, gameId, vote: gameId ? room.votes[gameId]?.[player.id] ?? null : null,
+      superlikeAvailable: !superlikeUsed(room, player.id),
+    };
   }
 
   /** Removes rooms idle longer than the TTL. Returns the expired codes. */
@@ -461,6 +473,20 @@ function applyVote(room: Room, playerId: string, gameId: string, vote: Vote | nu
   return true;
 }
 
+function isVoteValue(vote: unknown): vote is Vote | null {
+  return vote === null || vote === 'like' || vote === 'nope' || vote === 'played' || vote === 'superlike';
+}
+
+/** Closed cards are the only ones that can hold a player's frozen superlike besides the open card. */
+function superlikeUsedElsewhere(room: Room, playerId: string, openGameId: string): boolean {
+  return Object.entries(room.votes).some(([gameId, byPlayer]) => gameId !== openGameId && byPlayer[playerId] === 'superlike');
+}
+
+/** A superlike on the open card still counts as used: the player can only free it by changing the vote. */
+function superlikeUsed(room: Room, playerId: string): boolean {
+  return Object.values(room.votes).some((byPlayer) => byPlayer[playerId] === 'superlike');
+}
+
 function everyoneVoted(room: Room): boolean {
   const cardVotes = room.votes[room.deck[room.index]] ?? {};
   return room.players.every((p) => cardVotes[p.id] !== undefined);
@@ -469,12 +495,14 @@ function everyoneVoted(room: Room): boolean {
 /** Freezes the open card's tally. playedOut needs a strict majority of the votes CAST (0 votes never qualifies). */
 function closeCurrentCard(room: Room): void {
   const gameId = room.deck[room.index];
-  const cardVotes = Object.values(room.votes[gameId] ?? {});
-  const likes = cardVotes.filter((v) => v === 'like').length;
+  const entries = Object.entries(room.votes[gameId] ?? {});
+  const cardVotes = entries.map(([, v]) => v);
+  const superlikedBy = entries.filter(([, v]) => v === 'superlike').map(([id]) => id).sort();
+  const likes = cardVotes.filter((v) => v === 'like' || v === 'superlike').length;
   const nopes = cardVotes.filter((v) => v === 'nope').length;
   const played = cardVotes.filter((v) => v === 'played').length;
   const result: CardResult = {
-    gameId, likes, nopes, played, playedOut: played * 2 > likes + nopes + played, match: likes === room.players.length,
+    gameId, likes, superlikes: superlikedBy.length, superlikedBy, nopes, played, playedOut: played * 2 > likes + nopes + played, match: likes === room.players.length,
   };
   room.history.push(result);
   room.lastResult = result;

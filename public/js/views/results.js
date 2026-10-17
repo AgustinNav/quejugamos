@@ -3,7 +3,7 @@
 // got to vote are listed too.
 import { $, esc, showScreen, toast } from '../dom.js';
 import { discountPercent, getGame, getDetails, loadMany, priceInfo, priceUsd, storeUrl } from '../catalog.js';
-import { finishedEarly, idsToFetch, playedOutResults, rankedResults, unvotedGameIds } from '../ranking-data.js';
+import { finishedEarly, idsToFetch, playedOutResults, rankedResults, rankScore, unvotedGameIds } from '../ranking-data.js';
 import { applyView, DEFAULT_PREFS, FILTERS, hasActiveFilters, needsAllDetails, normalizePrefs, SORTS } from '../ranking-sort.js';
 import { buildExport } from '../ranking-export.js';
 import { copyRankingText, savePoster } from '../ranking-share.js';
@@ -23,11 +23,13 @@ let lastState = null;
 const playedLabel = (n) => `${n} lo jugaron`;
 
 // Counts come only from the server's frozen per-card result (never recomputed from `votes`, see
-// CLAUDE.md Mistakes Log); `votes` only supplies the names of likers still in the room.
+// CLAUDE.md Mistakes Log); `votes` only supplies the names of likers still in the room. SuperLike names
+// come from the frozen result (`superlikedBy`), also filtered to players still in the room.
 function tally(state, result) {
   const votes = state.votes[result.gameId] || {};
   const likers = state.players.filter((p) => votes[p.id] === 'like').map((p) => p.name);
-  return { likers, ...result };
+  const superlikers = state.players.filter((p) => (result.superlikedBy ?? []).includes(p.id)).map((p) => p.name);
+  return { likers, superlikers, ...result };
 }
 
 /** Paints the "Ya jugados" group (cards most voters had already played) into the given group/list. */
@@ -73,13 +75,13 @@ function savePrefs() {
   }
 }
 
-// Default order = server-frozen likes/nopes (cheaper first on ties). `rank` is the position in that
+// Default order = server-frozen score (a SuperLike counts double) then nopes (cheaper first on ties). `rank` is the position in that
 // order and stays attached to the row, so re-sorting or filtering never renumbers a game.
 function rankRows(state) {
   const rows = rankedResults(state)
     .filter((r) => getGame(r.gameId))
     .map((r) => ({ game: getGame(r.gameId), ...tally(state, r) }))
-    .sort((a, b) => b.likes - a.likes || a.nopes - b.nopes || (priceUsd(a.game) ?? 99) - (priceUsd(b.game) ?? 99));
+    .sort((a, b) => rankScore(b) - rankScore(a) || a.nopes - b.nopes || (priceUsd(a.game) ?? 99) - (priceUsd(b.game) ?? 99));
   return rows.map((row, i) => ({
     ...row,
     rank: i + 1,
@@ -170,7 +172,7 @@ function paint({ all, shown }, list, emptyText, toolbar) {
   list.querySelectorAll('[data-pct]').forEach((bar) => { bar.style.width = `${bar.dataset.pct}%`; });
 }
 
-function resultRow({ game, likers, likes, nopes, played, match: isMatch, rank }) {
+function resultRow({ game, likers, superlikers, superlikes = 0, likes, nopes, played, match: isMatch, rank }) {
   const d = getDetails(game.id) || {};
   const cast = likes + nopes + played;
   const thumb = d.header ? `<img src="${esc(d.header)}" alt="">` : `<div class="thumb-ph">${esc(game.name)}</div>`;
@@ -178,13 +180,15 @@ function resultRow({ game, likers, likes, nopes, played, match: isMatch, rank })
   const price = priceInfo(game);
   const playedHtml = played ? ` · ${playedLabel(played)}` : '';
   const likersHtml = likers.length ? ` · <span class="likers">${likers.map(esc).join(', ')}</span>` : '';
+  // Names of those still in the room; when everyone who gave one left, the count alone.
+  const superHtml = superlikes ? ` · <span class="superlikers">⭐ ${superlikers.length ? superlikers.map(esc).join(', ') : superlikes}</span>` : '';
   return `
     <li class="${isMatch ? 'match' : ''}">
       <span class="rank" aria-label="${isMatch ? 'Match' : `Puesto ${rank}`}">${isMatch ? '💘' : rank}</span>
       ${thumb}
       <div>
         <p class="r-name">${esc(game.name)}</p>
-        <p class="r-sub">${likes}/${cast} likes · ${nopes} nope${playedHtml}${likersHtml}</p>
+        <p class="r-sub">${likes}/${cast} likes · ${nopes} nope${playedHtml}${superHtml}${likersHtml}</p>
         <div class="bar"><span data-pct="${cast ? Math.round((likes / cast) * 100) : 0}"></span></div>
       </div>
       <div class="r-right">

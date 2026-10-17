@@ -14,6 +14,7 @@ const MESSAGES = {
   already_started: 'La votación ya arrancó.',
   empty_deck: 'Ningún juego pasa esos filtros. Aflojá alguno y probá de nuevo.',
   invalid_vote: 'No pudimos registrar ese voto. Probá de nuevo.',
+  superlike_used: 'Ya usaste tu SuperLike en esta sala',
   not_current_game: 'Esa tarjeta ya se cerró: votá la que sigue.',
   not_voting: 'No hay ninguna votación en curso.',
   nothing_to_undo: 'No hay nada para deshacer.',

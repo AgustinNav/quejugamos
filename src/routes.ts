@@ -38,8 +38,8 @@ function publish(deps: ApiDeps, before: Snapshot, after: Snapshot): void {
   if (after.version === before.version) return;
   deps.hub.broadcast(after.code, after);
   if (after.lastResult && after.index > before.index) {
-    const { gameId, likes, nopes, played, playedOut, match } = after.lastResult;
-    deps.log('card_closed', { roomCode: after.code, gameId, likes, nopes, played, playedOut, match, finished: after.phase === 'finished' });
+    const { gameId, likes, superlikes, nopes, played, playedOut, match } = after.lastResult;
+    deps.log('card_closed', { roomCode: after.code, gameId, likes, superlikes, nopes, played, playedOut, match, finished: after.phase === 'finished' });
   }
 }
 
@@ -88,7 +88,8 @@ export const voteRoom: Handler = async (deps, { req, res, code }) => {
   const after = deps.store.vote(code, token, field(body, 'gameId'), field(body, 'vote'));
   publish(deps, before, after);
   // Snapshots hide open-card votes, so the voter gets their own back here (null once the card closed).
-  sendJson(res, 200, { ...after, myVote: deps.store.currentVote(code, token).vote });
+  const mine = deps.store.currentVote(code, token);
+  sendJson(res, 200, { ...after, myVote: mine.vote, superlikeAvailable: mine.superlikeAvailable });
 };
 
 export const myVote: Handler = (deps, { req, res, code }) => {

@@ -12,6 +12,8 @@ import { bindResultsTools, bindUnvoted } from './views/results.js';
 import { toggleMute, volumeUp, volumeDown, openCardGallery } from './media.js';
 import { bindSwipe, isCardOut, returnCard } from './swipe.js';
 import { closesCard } from './gesture.js';
+import { superlikeAvailable } from './superlike.js';
+import { askConfirm, bindConfirmDialog } from './confirm-dialog.js';
 
 // The UI was behind the server (e.g. the SSE stream died while the phone was locked).
 const STALE_STATE_ERRORS = new Set(['not_current_game', 'not_voting']);
@@ -37,6 +39,16 @@ function applyResponse(room, snapshot) {
   if (!applySnapshot(room, snapshot)) renderPhase(room);
 }
 
+// Mirrors the server rule (one per room) from the frozen votes; the server still has the last word (409).
+function hasSuperlike(room) {
+  return superlikeAvailable({
+    state: room.state,
+    playerId: room.session.playerId,
+    myVote: myVote(room),
+    pendingElsewhere: room.optimistic?.vote === 'superlike',
+  });
+}
+
 // Only the last missing vote (and not the last card of the deck, whose next screen is the ranking,
 // which exists only once the server froze the results) advances the screen before the server answers.
 function advancesOptimistically(state, playerId) {
@@ -49,13 +61,15 @@ const resyncsAfterError = (code) => code !== 'unauthorized' && !STALE_STATE_ERRO
 export async function castVote(vote) {
   const room = activeRoom();
   if (!canVote(room) || myVote(room) === vote) return;
+  if (vote === 'superlike' && !hasSuperlike(room)) return void toast(errorMessage('superlike_used'));
   const gameId = currentGameId(room.state);
   room.pendingVote = { gameId, vote };
   renderPhase(room); // optimistic: the button lights up right away
   if (advancesOptimistically(room.state, room.session.playerId)) beginOptimisticAdvance(room, vote);
   const advance = room.optimistic;
   try {
-    const { myVote: ownVote, ...snapshot } = await api.vote(room.code, room.session.playerToken, gameId, vote);
+    // superlikeAvailable is the server's view for this caller; the UI derives it from the frozen votes instead.
+    const { myVote: ownVote, superlikeAvailable: _unused, ...snapshot } = await api.vote(room.code, room.session.playerToken, gameId, vote);
     room.pendingVote = null;
     setMyVote(room, currentGameId(snapshot), ownVote);
     applyResponse(room, snapshot);
@@ -78,6 +92,10 @@ export async function castVote(vote) {
 function swipeVote(vote) {
   const room = activeRoom();
   if (!canVote(room) || myVote(room) === vote) return 'stay';
+  if (vote === 'superlike' && !hasSuperlike(room)) {
+    toast(errorMessage('superlike_used'));
+    return 'stay';
+  }
   const leaves = closesCard(room.state, room.session.playerId);
   castVote(vote);
   return leaves ? 'leave' : 'stay';
@@ -104,8 +122,18 @@ export const finishVoting = () => hostAction(api.finish);
 export async function closeRoom() {
   const room = activeRoom();
   if (!room?.isHost || room.closing) return;
-  if (!window.confirm('¿Cerrar la sala para todos? Se borran los nombres y los votos.')) return;
-  room.closing = true;
+  room.closing = true; // also blocks a second dialog while this one is open
+  const confirmed = await askConfirm({
+    title: '¿Cerrar la sala para todos?',
+    body: 'Se borran los nombres y los votos.',
+    confirmLabel: 'Cerrar sala',
+    cancelLabel: 'Cancelar',
+    danger: true,
+  });
+  if (!confirmed || room.disposed) {
+    room.closing = false;
+    return;
+  }
   try {
     await api.close(room.code, room.session.hostToken);
     failRoom(room, 'closed'); // the `closed` SSE event may also arrive: failRoom is idempotent
@@ -118,11 +146,18 @@ export async function closeRoom() {
 }
 
 // Removes a duplicate/abandoned player so they stop blocking auto-advance and matches.
-export function kickPlayer(playerId) {
+export async function kickPlayer(playerId) {
   const room = activeRoom();
   const player = room?.state?.players.find((p) => p.id === playerId);
   if (!room?.isHost || !player || player.isHost) return;
-  if (!window.confirm(`¿Sacar a ${player.name} de la sala?`)) return;
+  const confirmed = await askConfirm({
+    title: `¿Sacar a ${player.name} de la sala?`,
+    body: 'Va a tener que volver a entrar con su nombre para seguir votando.',
+    confirmLabel: 'Sacar',
+    cancelLabel: 'Cancelar',
+    danger: true,
+  });
+  if (!confirmed || room.disposed || activeRoom() !== room) return;
   hostAction((code, token) => api.kick(code, token, playerId));
 }
 
@@ -147,6 +182,8 @@ const KEYS = {
   ArrowRight: () => castVote('like'),
   j: () => castVote('played'),
   J: () => castVote('played'),
+  s: () => castVote('superlike'),
+  S: () => castVote('superlike'),
   m: toggleMute,
   M: toggleMute,
   '+': volumeUp,
@@ -172,10 +209,12 @@ export function bindActions() {
   $('voteLikeBtn').addEventListener('click', () => castVote('like'));
   $('voteNopeBtn').addEventListener('click', () => castVote('nope'));
   $('votePlayedBtn').addEventListener('click', () => castVote('played'));
+  $('voteSuperBtn').addEventListener('click', () => castVote('superlike'));
   $('nextBtn').addEventListener('click', forceNext);
   $('undoBtn').addEventListener('click', undo);
   $('finishBtn').addEventListener('click', finishVoting);
   $('resumeVotingBtn').addEventListener('click', undo);
+  bindConfirmDialog();
   bindRankingSheet(() => activeRoom()?.state);
   document.querySelectorAll('[data-close-room]').forEach((btn) => btn.addEventListener('click', closeRoom));
   bindUnvoted(() => activeRoom()?.state);
