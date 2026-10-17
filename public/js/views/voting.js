@@ -5,6 +5,7 @@ import { getGame, getDetails, loadDetails, priceInfo, playersLabel, storeLinks, 
 import { renderMedia } from '../media.js';
 import { showVoteStamp } from '../swipe.js';
 import { renderUnder } from '../stack.js';
+import { cardPlatforms, showsPcInfo } from '../platforms.js';
 
 const VOTE_EMOJI = { like: '👍', nope: '👎', played: '✅' };
 
@@ -40,13 +41,14 @@ export function forgetRenderedGame() {
 function showGame(id, state) {
   renderedGameId = id;
   const game = gameOrStub(id);
+  const roomPlatforms = state.filters?.platforms ?? null;
   $('gameReqs').open = false; // closed by default on every new card
-  renderInfo(game);
+  renderInfo(game, roomPlatforms);
   renderMedia(game);
   // Paint immediately with static data, then again once Steam details arrive.
   loadDetails(id).then((details) => {
     if (details && renderedGameId === id) {
-      renderInfo(game);
+      renderInfo(game, roomPlatforms);
       renderMedia(game, { force: true });
     }
   });
@@ -62,12 +64,12 @@ function renderNext(id, nextId) {
   });
 }
 
-function renderInfo(game) {
+function renderInfo(game, roomPlatforms) {
   const price = priceInfo(game);
   $('gameName').textContent = game.name;
   $('gamePrice').innerHTML = price.html;
   $('gamePrice').className = `price ${price.free ? 'free' : ''}`;
-  $('gameMeta').innerHTML = metaPills(game).join('');
+  $('gameMeta').innerHTML = metaPills(game, roomPlatforms).join('');
   $('gameTags').innerHTML = game.tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join(' ');
   $('gamePitch').textContent = game.pitch;
   const d = getDetails(game.id) || {};
@@ -76,7 +78,7 @@ function renderInfo(game) {
     .map(([label, url, kind, icon]) => linkButton(label, url, kind, icon))
     .join('');
   renderDeal(game);
-  renderRequirements(game);
+  renderRequirements(game, roomPlatforms);
 }
 
 // Real <a> buttons; label/url are escaped, kind/icon come from catalog.js constants.
@@ -94,8 +96,8 @@ function renderDeal(game) {
   badge.textContent = deal ? (deal.free ? 'GRATIS' : `🔥 -${deal.off}%`) : '';
 }
 
-function renderRequirements(game) {
-  const reqs = pcRequirements(game);
+function renderRequirements(game, roomPlatforms) {
+  const reqs = showsPcInfo(roomPlatforms) ? pcRequirements(game) : null;
   $('gameReqs').hidden = !reqs;
   if (!reqs) return $('gameReqsBody').replaceChildren();
   const groups = [['Mínimos', reqs.minimum], ['Recomendados', reqs.recommended]]
@@ -119,12 +121,12 @@ function reqGroup(title, lines) {
   return group;
 }
 
-function metaPills(game) {
+function metaPills(game, roomPlatforms) {
   const d = getDetails(game.id) || {};
   const cross = { true: ['good', '✓ Crossplay'], false: ['bad', '✕ Sin crossplay'] }[game.crossplay] || ['warn', '? Crossplay: verificar'];
   const pills = [
     `<span class="pill players">${playersLabel(game)}</span>`,
-    ...game.platforms.map((p) => `<span class="pill extra">${esc(p)}</span>`),
+    ...cardPlatforms(game.platforms, roomPlatforms).map((p) => `<span class="${p.className}">${esc(p.name)}</span>`),
     `<span class="pill extra ${cross[0]}">${cross[1]}</span>`,
   ];
   if (d.reviews) pills.push(`<span class="pill extra">⭐ ${Number(d.reviews).toLocaleString('es-AR')} reseñas</span>`);

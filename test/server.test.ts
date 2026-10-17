@@ -116,11 +116,21 @@ describe('full flow', () => {
     for (const id of res.body.deck) assert.ok(nonSteam.includes(id), id);
   });
 
-  test('start answers 422 empty_deck and 400 invalid_filters', async () => {
+  test('start with only PlayStation deals only games that run on PlayStation', async () => {
     const room = await createRoom();
-    const empty = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { ...FILTERS, platforms: [] } }, room.hostToken);
-    assert.equal(empty.status, 422);
-    assert.equal(empty.body.error, 'empty_deck');
+    const res = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { ...FILTERS, platforms: ['PlayStation'] } }, room.hostToken);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.filters.platforms, ['PlayStation']);
+    const onPs = GAMES.filter((g) => g.platforms.includes('PlayStation')).map((g) => g.id);
+    assert.deepEqual([...res.body.deck].sort(), onPs.sort());
+  });
+
+  test('start answers 400 invalid_filters (422 empty_deck is covered in rooms.test.ts)', async () => {
+    const room = await createRoom();
+    // No platform chosen is a filter error, not an empty deck: the lobby starts with nothing selected.
+    const none = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { ...FILTERS, platforms: [] } }, room.hostToken);
+    assert.equal(none.status, 400);
+    assert.equal(none.body.error, 'invalid_filters');
     const bad = await api(base, 'POST', `/api/rooms/${room.code}/start`, { filters: { platforms: 'PC' } }, room.hostToken);
     assert.equal(bad.status, 400);
     assert.equal(bad.body.error, 'invalid_filters');

@@ -89,6 +89,24 @@ describe('catalog integrity', () => {
     }
   });
 
+  // Whatever the host picks, every card in the deck runs on at least one of those platforms.
+  test('every platform subset only deals games on a chosen platform, and misses none', () => {
+    for (let mask = 1; mask < 1 << PLATFORMS.length; mask += 1) {
+      const chosen = PLATFORMS.filter((_, i) => mask & (1 << i));
+      const deck = new Set(buildDeck(GAMES, { platforms: chosen, maxPrice: null, fitsGroup: false, playerCount: null }, 1, new Map(), () => 0));
+      for (const g of GAMES) {
+        assert.equal(deck.has(g.id), g.platforms.some((p) => chosen.includes(p)), `${chosen.join('+')}: ${g.id}`);
+      }
+    }
+  });
+
+  test('every single platform leaves a playable deck', () => {
+    for (const platform of PLATFORMS) {
+      const deck = buildDeck(GAMES, { platforms: [platform], maxPrice: null, fitsGroup: false, playerCount: null }, 1, new Map(), () => 0);
+      assert.ok(deck.length >= 3, `${platform}: ${deck.length}`);
+    }
+  });
+
   test('every player-count option leaves a real deck on PC', () => {
     for (const playerCount of [2, 3, 4, 5]) {
       const deck = buildDeck(GAMES, { platforms: ['PC'], maxPrice: null, fitsGroup: true, playerCount }, 1, new Map(), () => 0);
@@ -132,6 +150,7 @@ describe('parseFilters', () => {
     { ...ok, platforms: 'PC' }, { ...ok, platforms: ['Amiga'] }, { ...ok, platforms: [1] },
     { ...ok, maxPrice: -1 }, { ...ok, maxPrice: '20' }, { ...ok, maxPrice: Infinity }, { ...ok, maxPrice: undefined },
     { ...ok, fitsGroup: 'yes' }, { ...ok, platforms: Array(100).fill('PC') },
+    { ...ok, platforms: [] },
     modern, { ...modern, fitsGroup: 'yes', playerCount: 2 },
     { ...ok, playerCount: 0 }, { ...ok, playerCount: 33 }, { ...ok, playerCount: 2.5 }, { ...ok, playerCount: '2' },
     { ...ok, playerCount: -1 }, { ...ok, playerCount: true }, { ...ok, playerCount: [2] }, { ...ok, playerCount: NaN },
